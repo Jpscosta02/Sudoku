@@ -23,6 +23,7 @@ int main(int argc, char *argv[]) {
     int jogo[TAM][TAM];
     int solucao[TAM][TAM];
 
+
     // Sudoku do enunciado
     const char *jogoStr =
         "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
@@ -32,6 +33,12 @@ int main(int argc, char *argv[]) {
     // Converter as strings para matrizes 9x9
     lerSudokuDeString(jogoStr, jogo);
     lerSudokuDeString(solucaoStr, solucao);
+
+    printf("\nTabuleiro de Sudoku:\n");
+    mostrarSudoku(jogo);
+
+    printf("\nSolucao:\n");
+    mostrarSudoku(solucao);
 
     
     // Verificar se o Sudoku está correto
