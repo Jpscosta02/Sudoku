@@ -1,5 +1,4 @@
 # Compilação do Servidor Sudoku e do Cliente Sudoku
-# (1ª entrega - leitura de configuração, logs e verificação de Sudoku)
 
 CC = gcc
 CFLAGS = -g -std=c99 -Wall

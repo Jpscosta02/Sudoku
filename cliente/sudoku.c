@@ -26,7 +26,7 @@ int verificarValoresValidos(int sudoku[TAM][TAM]) {
     for (int i = 0; i < TAM; i++) {
         for (int j = 0; j < TAM; j++) {
             if (sudoku[i][j] < 0 || sudoku[i][j] > 9) {
-                printf("❌ Valor inválido em (%d,%d): %d\n", i + 1, j + 1, sudoku[i][j]);
+                printf(" Valor inválido em (%d,%d): %d\n", i + 1, j + 1, sudoku[i][j]);
                 return -1;
             }
         }
@@ -45,7 +45,7 @@ int verificarLinhas(int sudoku[TAM][TAM]) {
             int num = sudoku[i][j];
             if (num == 0) continue;
             if (vistos[num]) {
-                printf("❌ Repetição do número %d na linha %d\n", num, i + 1);
+                printf(" Repetição do número %d na linha %d\n", num, i + 1);
                 erros++;
             }
             vistos[num] = 1;
@@ -65,7 +65,7 @@ int verificarColunas(int sudoku[TAM][TAM]) {
             int num = sudoku[i][j];
             if (num == 0) continue;
             if (vistos[num]) {
-                printf("❌ Repetição do número %d na coluna %d\n", num, j + 1);
+                printf(" Repetição do número %d na coluna %d\n", num, j + 1);
                 erros++;
             }
             vistos[num] = 1;
@@ -87,7 +87,7 @@ int verificarBlocos(int sudoku[TAM][TAM]) {
                     int num = sudoku[bi + i][bj + j];
                     if (num == 0) continue;
                     if (vistos[num]) {
-                        printf("❌ Repetição do número %d no bloco 3x3 (%d,%d)\n",
+                        printf(" Repetição do número %d no bloco 3x3 (%d,%d)\n",
                                num, bi / 3 + 1, bj / 3 + 1);
                         erros++;
                     }
@@ -109,7 +109,7 @@ int compararComSolucao(int sudoku[TAM][TAM], int solucao[TAM][TAM]) {
             if (sudoku[i][j] != 0 && sudoku[i][j] != solucao[i][j])
                 dif++;
     if (dif > 0)
-        printf("⚠️  Sudoku difere da solução em %d posições.\n", dif);
+        printf("  Sudoku difere da solução em %d posições.\n", dif);
     return dif;
 }
 
@@ -129,11 +129,11 @@ int verificarSudoku(int sudoku[TAM][TAM], int solucao[TAM][TAM]) {
     int dif = compararComSolucao(sudoku, solucao);
 
     if (erros == 0 && dif == 0)
-        printf("✅ Sudoku válido e correto!\n");
+        printf(" Sudoku válido e correto!\n");
     else if (erros == 0)
-        printf("✅ Sudoku válido mas diferente da solução.\n");
+        printf(" Sudoku válido mas diferente da solução.\n");
     else
-        printf("❌ Sudoku inválido (%d erros encontrados)\n", erros);
+        printf(" Sudoku inválido (%d erros encontrados)\n", erros);
 
     return erros + dif;
 }

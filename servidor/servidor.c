@@ -43,11 +43,11 @@ int main(int argc, char *argv[]) {
     else {
         int erros = verificarSudoku(jogo, solucao);
         if (erros == 0) {
-            printf("✅ Sudoku verificado: sem erros!\n");
+            printf(" Sudoku verificado: sem erros!\n");
             registarEvento("logs/servidor.log", "Verificação: Sudoku correto");
         }
         else {
-            printf("❌ Sudoku incorreto: %d erros encontrados.\n", erros);
+            printf(" Sudoku incorreto: %d erros encontrados.\n", erros);
             registarEvento("logs/servidor.log", "Verificação: Sudoku incorreto");
         }
     }
