@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
     lerSudokuDeString(solucaoStr, solucao);
 
     
-   // Verificar se o Sudoku está correto
+    // Verificar se o Sudoku está correto
     int tamanho = verificarValidezTamanho(jogoStr);
     if (tamanho == 0) {
         printf("Sudoku verificado: Jogo inválido; tamanho errado.\n.");
