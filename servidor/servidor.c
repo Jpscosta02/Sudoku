@@ -1,62 +1,61 @@
 #include <stdio.h>
-#include "configuracao.h"
-#include "logs.h"
-#include "sudoku.h"
-// Se estas a ler isto, eu consegui. Palavra-passe: semilhas.
-int main(int argc, char *argv[]) {
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+
+#include "../comum/configuracao.h"
+#include "../comum/logs.h"
+#include "../protocolo/protocolo.h"
+#include "servidor_tcp.h"
+#include "jogos.h"
+#include "tratar_cliente.h"
+
+int main(int argc, char *argv[])
+{
+    ConfigServidor cfg;
+    int sockfd;
+
     if (argc < 2) {
         printf("Uso: %s <ficheiro_config>\n", argv[0]);
         return 1;
     }
 
-    // --- Ler configuração do servidor ---
-    ConfigServidor cfg;
     if (!carregarConfiguracaoServidor(argv[1], &cfg)) {
         return 1;
     }
 
-    // --- Registar evento inicial ---
     registarEvento("logs/servidor.log", "Servidor iniciado");
-    printf("Servidor configurado na porta %d\n", cfg.porta);
 
-    // --- TESTE DE VERIFICAÇÃO DE SUDOKU ---
-    int jogo[TAM][TAM];
-    int solucao[TAM][TAM];
-
-
-    // Sudoku do enunciado
-    const char *jogoStr =
-        "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
-    const char *solucaoStr =
-        "534678912672195348198342567859761423426853791713924856961537284287419635345286179";
-
-    // Converter as strings para matrizes 9x9
-    lerSudokuDeString(jogoStr, jogo);
-    lerSudokuDeString(solucaoStr, solucao);
-
-    printf("\nTabuleiro de Sudoku:\n");
-    mostrarSudoku(jogo);
-
-    printf("\nSolucao:\n");
-    mostrarSudoku(solucao);
-
-    
-    // Verificar se o Sudoku está correto
-    int tamanho = verificarValidezTamanho(jogoStr);
-    if (tamanho == 0) {
-        printf("Sudoku verificado: Jogo inválido; tamanho errado.\n.");
-        registarEvento("logs/servidor.log", "Verificação: Sudoku inválido; tamanho errado.");
+    /* Carregar jogos do ficheiro */
+    if (!carregarJogosServidor(cfg.ficheiroJogos)) {
+        fprintf(stderr, "Erro a carregar jogos. A sair.\n");
+        return 1;
     }
-    else {
-        int erros = verificarSudoku(jogo, solucao);
-        if (erros == 0) {
-            printf(" Sudoku verificado: sem erros!\n");
-            registarEvento("logs/servidor.log", "Verificação: Sudoku correto");
+
+    /* Criar socket TCP */
+    sockfd = criarSocketServidor(cfg.porta);
+    printf("Servidor pronto na porta %d\n", cfg.porta);
+
+    while (1) {
+        pthread_t tid;
+        int *sockCliente = malloc(sizeof(int));
+
+        printf("\nÀ espera de cliente...\n");
+
+        *sockCliente = aceitarCliente(sockfd);
+        if (*sockCliente < 0) {
+            perror("Erro ao aceitar cliente");
+            free(sockCliente);
+            continue;
         }
-        else {
-            printf(" Sudoku incorreto: %d erros encontrados.\n", erros);
-            registarEvento("logs/servidor.log", "Verificação: Sudoku incorreto");
-        }
+
+        printf("Cliente ligado.\n");
+        registarEvento("logs/servidor.log", "Cliente conectado");
+
+        pthread_create(&tid, NULL, tratarCliente, sockCliente);
+        pthread_detach(tid);
     }
+    sleep(30);
+    close(sockfd);
     return 0;
 }
