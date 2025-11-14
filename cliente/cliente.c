@@ -1,63 +1,77 @@
-/**
- * @file main.c
- * @brief Programa principal do cliente.
- *
- * Este programa lê um ficheiro de configuração, inicializa o cliente
- * e regista o início da execução num ficheiro de logs. 
- * 
- * Utiliza as funções definidas em:
- *  - configuracao.h → para carregar os parâmetros do cliente.
- *  - logs.h → para registar eventos em ficheiros de log.
- */
-
+// cliente/cliente.c
 #include <stdio.h>
-#include "configuracao.h"
-#include "logs.h"
+#include <stdlib.h>
+#include <unistd.h>
 
-/**
- * @brief Função principal do programa cliente.
- *
- * O programa espera como argumento o caminho para um ficheiro de configuração.
- * A configuração é carregada, e se for válida, o cliente inicia e regista o
- * evento de arranque no log correspondente ao seu ID.
- *
- * @param argc Número de argumentos passados ao programa.
- * @param argv Vetor de strings com os argumentos:
- *             - argv[0]: nome do executável
- *             - argv[1]: caminho do ficheiro de configuração
- * @return int Código de saída:
- *         - 0 se o programa terminou corretamente.
- *         - 1 se ocorreu um erro (por exemplo, falta de argumentos
- *           ou erro ao carregar configuração).
- */
-int main(int argc, char *argv[]) {
-    // Verifica se o utilizador forneceu o ficheiro de configuração
+#include "../comum/configuracao.h"
+#include "../comum/logs.h"
+#include "../protocolo/protocolo.h"
+#include "cliente_tcp.h"
+
+int main(int argc, char *argv[])
+{
+    ConfigCliente cfg;
+    int sock, idAtribuido, idJogo;
+    char tabuleiro[128];
+    char ficheiroLog[128];
+
     if (argc < 2) {
         printf("Uso: %s <ficheiro_config>\n", argv[0]);
         return 1;
     }
 
-    ConfigCliente cfg;
-
-    // Carrega a configuração do cliente a partir do ficheiro indicado
     if (!carregarConfiguracaoCliente(argv[1], &cfg)) {
-        // Se falhar o carregamento, termina o programa com erro
         return 1;
     }
 
-    // Define o nome do ficheiro de log (ex: logs/cliente123.log)
-    char ficheiroLog[128];
+    /* Log inicial antes do ID */
     snprintf(ficheiroLog, sizeof(ficheiroLog), "logs/%s.log", cfg.idCliente);
-
-    // Regista o evento de início do cliente
     registarEvento(ficheiroLog, "Cliente iniciado");
 
-    // Mostra na consola as informações de ligação
-    printf("Cliente %s ligado ao servidor %s:%d\n",
+    printf("Cliente %s vai ligar ao servidor %s:%d\n",
            cfg.idCliente, cfg.ipServidor, cfg.porta);
+
+    /* 1. Ligar ao servidor */
+    sock = ligarServidor(cfg.ipServidor, cfg.porta);
+    registarEvento(ficheiroLog, "Ligado ao servidor");
+
+    /* 2. Pedir jogo */
+    pedirJogo(sock, cfg.idCliente);
+    registarEvento(ficheiroLog, "PEDIR_JOGO enviado");
+
+    /* 3. Receber ID atribuído */
+    if (receberIdAtribuidoCliente(sock, &idAtribuido) <= 0) {
+        registarEvento(ficheiroLog, "Erro ao receber ID atribuído");
+        close(sock);
+        return 1;
+    }
+
+    printf("Servidor atribuiu ID interno: %d\n", idAtribuido);
+
+    /* Troca para log correto deste cliente */
+    snprintf(ficheiroLog, sizeof(ficheiroLog), "logs/cliente_%d.log", idAtribuido);
+    registarEventoID(ficheiroLog, idAtribuido, "ID atribuído recebido");
+
+    /* 4. Receber jogo */
+    if (receberJogo(sock, &idJogo, tabuleiro) <= 0) {
+        registarEventoID(ficheiroLog, idAtribuido, "Erro ao receber jogo");
+        close(sock);
+        return 1;
+    }
+
+    printf("\n--- Jogo Recebido ---\n");
+    printf("ID Jogo: %d\n", idJogo);
+    printf("%s\n", tabuleiro);
+
+    registarEventoID(ficheiroLog, idAtribuido, "Jogo recebido com sucesso");
+
+    /* 5. Impedir o cliente de terminar automaticamente */
+    printf("\nPressiona ENTER para terminar o cliente...\n");
+    getchar();
+
+    /* Cliente irá fechar a ligação → servidor detecta e liberta ID */
+    registarEventoID(ficheiroLog, idAtribuido, "Cliente terminou");
+    close(sock);
 
     return 0;
 }
-
-
-

@@ -3,6 +3,6 @@
 
 void criarPastaLogs(void);
 void registarEvento(const char *ficheiro, const char *descricao);
+void registarEventoID(const char *ficheiro, int id, const char *descricao);
 
 #endif
-
