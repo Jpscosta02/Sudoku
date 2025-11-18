@@ -1,14 +1,14 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+// servidor/jogos.c
+
+#include <stdio.h>     
+#include <string.h>     
+
 #include "jogos.h"
 
-#define MAX_JOGOS 1024
-
-static Jogo jogos[MAX_JOGOS];
+static Jogo listaJogos[MAX_JOGOS];
 static int totalJogos = 0;
-static int indiceProximo = 0;
 
+/* Carrega jogos do ficheiro */
 int carregarJogosServidor(const char *ficheiro)
 {
     FILE *f = fopen(ficheiro, "r");
@@ -18,34 +18,42 @@ int carregarJogosServidor(const char *ficheiro)
     }
 
     char linha[256];
-    Jogo j;
+    int id;
+    char puzzle[82], sol[82];
 
     totalJogos = 0;
-    indiceProximo = 0;
 
     while (fgets(linha, sizeof(linha), f) && totalJogos < MAX_JOGOS) {
-        char puzzle[82], sol[82];
 
         if (sscanf(linha, "%d,%81[^,],%81s",
-                   &j.id, puzzle, sol) == 3) {
+                   &id, puzzle, sol) == 3) {
 
+            Jogo j;
+            j.id = id;
             strcpy(j.jogo, puzzle);
             strcpy(j.solucao, sol);
-            jogos[totalJogos++] = j;
+
+            listaJogos[totalJogos++] = j;
         }
     }
 
     fclose(f);
 
     printf("Foram carregados %d jogo(s).\n", totalJogos);
-    return totalJogos > 0;
+
+    return 1;
 }
 
+/* Devolve o próximo jogo */
 const Jogo *obterJogoProximo(void)
 {
+    static int indice = 0;
+
     if (totalJogos == 0) return NULL;
 
-    const Jogo *ptr = &jogos[indiceProximo];
-    indiceProximo = (indiceProximo + 1) % totalJogos;
-    return ptr;
+    const Jogo *j = &listaJogos[indice];
+
+    indice = (indice + 1) % totalJogos;
+
+    return j;
 }

@@ -1,29 +1,66 @@
 #ifndef PROTOCOLO_H
 #define PROTOCOLO_H
 
-/* Funções base */
+/* ======== BASE ======== */
+
 int enviarMensagem(int sock, const char *msg);
 int receberMensagem(int sock, char *buffer, int max);
 
-/* Pedido de jogo */
-int pedirJogo(int sock, const char *idClienteBase);
-int receberPedidoJogoServidor(int sock, char *idClienteBase, int maxLen);
+/* ======== PEDIR JOGO / MODOS ======== */
 
-/* ID Atribuído */
+/* Versão antiga mantida para compatibilidade – trata como modo normal */
+int pedirJogo(int sock, const char *idClienteBase);
+
+/* Versões novas explícitas */
+int pedirJogoNormal(int sock, const char *idClienteBase);
+int pedirJogoCompeticao(int sock, const char *idClienteBase);
+
+/* Versão antiga (servidor) – ainda existe, mas sem informação de modo */
+int receberPedidoJogoServidor(int sock, char *idClienteBase, int max);
+
+/* Versão nova – devolve modo:
+   modo = 0 → normal
+   modo = 1 → competição
+*/
+int receberPedidoJogoServidorModo(int sock, char *idClienteBase, int max, int *modo);
+
+/* ======== ID_ATRIBUIDO ======== */
+
 int enviarIdAtribuidoServidor(int sock, int idNovo);
 int receberIdAtribuidoCliente(int sock, int *idNovo);
 
-/* Envio/Receção de jogo */
-int enviarJogoServidor(int sock, int idJogo, const char *tabuleiro81);
-int receberJogo(int sock, int *idJogo, char *tabuleiro81);
+/* ======== JOGO ======== */
 
-/* Solução */
-int enviarSolucao(int sock, int idJogo, const char *sol81);
-int receberSolucaoServidor(int sock, int *idJogo, char *sol81);
+int enviarJogoServidor(int sock, int idJogo, const char *tab);
+int receberJogo(int sock, int *idJogo, char *tab);
 
-/* Resultado */
+/* ======== SOLUCAO ======== */
+
+int enviarSolucao(int sock, int idJogo, const char *sol);
+int receberSolucaoServidor(int sock, int *idJogo, char *sol);
+
+/* ======== RESULTADO ======== */
+
 int enviarResultadoOK(int sock, int idJogo);
 int enviarResultadoErros(int sock, int idJogo, int erros);
 int receberResultado(int sock, int *idJogo, int *erros);
+
+/* ======== SAIR ======== */
+
+int enviarSair(int sock);
+int receberSairServidor(int sock);
+
+/* ======== ERRO ======== */
+
+int enviarErro(int sock, const char *descricao);
+int receberErro(int sock, char *descricao, int maxLen);
+
+/* ================== RANKING (Competição) ================== */
+
+/* Lê a linha "RANKING N" */
+int receberRankingHeader(int sock, int *nEntradas);
+
+/* Lê linhas "id tempo" */
+int receberRankingLinha(int sock, int *idCliente, double *tempo);
 
 #endif

@@ -1,6 +1,8 @@
 #ifndef JOGOS_H
 #define JOGOS_H
 
+#define MAX_JOGOS 128
+
 typedef struct {
     int id;
     char jogo[82];
