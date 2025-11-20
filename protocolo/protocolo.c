@@ -1,104 +1,122 @@
+// protocolo/protocolo.c
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
 #include "protocolo.h"
 
-/* ================= MENSAGENS BASE ================= */
+/* ============================================================
+   LEITURA LINHA-A-LINHA
+   ============================================================ */
+
+static int receberLinha(int sock, char *buffer, int max)
+{
+    int pos = 0;
+
+    while (pos < max - 1) {
+        char c;
+        int n = read(sock, &c, 1);
+        if (n <= 0) {
+            if (pos == 0) return n;   // erro ou ligação fechada logo de início
+            break;
+        }
+        buffer[pos++] = c;
+        if (c == '\n') break;
+    }
+
+    buffer[pos] = '\0';
+    return pos;
+}
+
+/* ============================================================
+   MENSAGEM BASE
+   ============================================================ */
 
 int enviarMensagem(int sock, const char *msg)
 {
     return write(sock, msg, strlen(msg));
 }
 
-int receberMensagem(int sock, char *buffer, int max)
-{
-    int n = read(sock, buffer, max - 1);
-    if (n <= 0) return n;
-    buffer[n] = '\0';
-    return n;
-}
+/* ============================================================
+   PEDIR JOGO (CLIENTE -> SERVIDOR)
+   ============================================================ */
 
-/* ================= PEDIR_JOGO / MODOS ================= */
-
-/* Versão antiga – mantém compatibilidade, trata como modo normal */
-int pedirJogo(int sock, const char *idClienteBase)
-{
-    return pedirJogoNormal(sock, idClienteBase);
-}
-
-/* NOVO: modo normal explícito */
-int pedirJogoNormal(int sock, const char *idClienteBase)
+int pedirJogoNormal(int sock, const char *id)
 {
     char msg[128];
-    snprintf(msg, sizeof(msg), "JOGO_NORMAL %s\n", idClienteBase);
+    snprintf(msg, sizeof(msg), "JOGO_NORMAL %s\n", id);
     return enviarMensagem(sock, msg);
 }
 
-/* NOVO: modo competição explícito */
-int pedirJogoCompeticao(int sock, const char *idClienteBase)
+int pedirJogoCompeticao(int sock, const char *id, int equipa)
 {
     char msg[128];
-    snprintf(msg, sizeof(msg), "JOGO_COMPETICAO %s\n", idClienteBase);
+    snprintf(msg, sizeof(msg), "JOGO_COMPETICAO %s %d\n", id, equipa);
     return enviarMensagem(sock, msg);
 }
 
-/* Versão antiga – mantém, mas sem info de modo */
-int receberPedidoJogoServidor(int sock, char *idClienteBase, int max)
+/* Versão simples antiga (se ainda for usada nalgum sítio) */
+int receberPedidoJogoServidor(int sock, char *idOut, int max)
 {
-    int modoLixo;
-    return receberPedidoJogoServidorModo(sock, idClienteBase, max, &modoLixo);
+    int modoDummy, equipaDummy;
+    return receberPedidoJogoServidorModo(sock, idOut, max, &modoDummy, &equipaDummy);
 }
 
-/* NOVO: versão que deteta o modo (0=normal, 1=competição) */
-int receberPedidoJogoServidorModo(int sock, char *idClienteBase, int max, int *modo)
+/* Versão completa: devolve modo (1=normal, 2=competição) e equipa */
+int receberPedidoJogoServidorModo(int sock,
+                                  char *idOut,
+                                  int max,
+                                  int *modoOut,
+                                  int *equipaOut)
 {
-    char buffer[128];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[128];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    /* Modo novo: JOGO_NORMAL <id> */
-    if (sscanf(buffer, "JOGO_NORMAL %s", idClienteBase) == 1) {
-        if (modo) *modo = 0;
+    int equipaTmp;
+
+    /* Jogo normal */
+    if (sscanf(buf, "JOGO_NORMAL %s", idOut) == 1) {
+        if (modoOut)   *modoOut   = 1;  // 1 = normal
+        if (equipaOut) *equipaOut = 0;
         return 1;
     }
 
-    /* Modo novo: JOGO_COMPETICAO <id> */
-    if (sscanf(buffer, "JOGO_COMPETICAO %s", idClienteBase) == 1) {
-        if (modo) *modo = 1;
-        return 1;
-    }
-
-    /* Compatibilidade: comando antigo PEDIR_JOGO <id> → trata como normal */
-    if (sscanf(buffer, "PEDIR_JOGO %s", idClienteBase) == 1) {
-        if (modo) *modo = 0;
+    /* Jogo competição por equipas */
+    if (sscanf(buf, "JOGO_COMPETICAO %s %d", idOut, &equipaTmp) == 2) {
+        if (modoOut)   *modoOut   = 2;  // 2 = competição
+        if (equipaOut) *equipaOut = equipaTmp;
         return 1;
     }
 
     return -1;
 }
 
-/* ================= ID_ATRIBUIDO ================= */
+/* ============================================================
+   ID ATRIBUÍDO
+   ============================================================ */
 
-int enviarIdAtribuidoServidor(int sock, int idNovo)
+int enviarIdAtribuidoServidor(int sock, int id)
 {
-    char msg[128];
-    snprintf(msg, sizeof(msg), "ID_ATRIBUIDO %d\n", idNovo);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "ID_ATRIBUIDO %d\n", id);
     return enviarMensagem(sock, msg);
 }
 
-int receberIdAtribuidoCliente(int sock, int *idNovo)
+int receberIdAtribuidoCliente(int sock, int *id)
 {
-    char buffer[128];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[128];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    if (sscanf(buffer, "ID_ATRIBUIDO %d", idNovo) == 1)
+    if (sscanf(buf, "ID_ATRIBUIDO %d", id) == 1)
         return 1;
-
     return -1;
 }
 
-/* ================= JOGO ================= */
+/* ============================================================
+   JOGO
+   ============================================================ */
 
 int enviarJogoServidor(int sock, int idJogo, const char *tab)
 {
@@ -109,17 +127,19 @@ int enviarJogoServidor(int sock, int idJogo, const char *tab)
 
 int receberJogo(int sock, int *idJogo, char *tab)
 {
-    char buffer[256];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[256];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    if (sscanf(buffer, "JOGO %d %s", idJogo, tab) == 2)
+    if (sscanf(buf, "JOGO %d %81s", idJogo, tab) == 2)
         return 1;
 
     return -1;
 }
 
-/* ================= SOLUCAO ================= */
+/* ============================================================
+   SOLUCAO
+   ============================================================ */
 
 int enviarSolucao(int sock, int idJogo, const char *sol)
 {
@@ -130,17 +150,59 @@ int enviarSolucao(int sock, int idJogo, const char *sol)
 
 int receberSolucaoServidor(int sock, int *idJogo, char *sol)
 {
-    char buffer[256];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[256];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    if (sscanf(buffer, "SOLUCAO %d %s", idJogo, sol) == 2)
+    if (sscanf(buf, "SOLUCAO %d %81s", idJogo, sol) == 2)
         return 1;
 
     return -1;
 }
 
-/* ================= RESULTADO ================= */
+/* ============================================================
+   SET / UPDATE (sincronização de equipas)
+   ============================================================ */
+
+int enviarSET(int sock, int lin, int col, int val)
+{
+    char msg[64];
+    snprintf(msg, sizeof(msg), "SET %d %d %d\n", lin, col, val);
+    return enviarMensagem(sock, msg);
+}
+
+int receberSET(int sock, int *lin, int *col, int *val)
+{
+    char buf[128];
+    int n = receberLinha(sock, buf, sizeof(buf));
+    if (n <= 0) return n;
+
+    if (sscanf(buf, "SET %d %d %d", lin, col, val) == 3)
+        return 1;
+    return 0;
+}
+
+int enviarUPDATE(int sock, int lin, int col, int val)
+{
+    char msg[64];
+    snprintf(msg, sizeof(msg), "UPDATE %d %d %d\n", lin, col, val);
+    return enviarMensagem(sock, msg);
+}
+
+int receberUPDATE(int sock, int *lin, int *col, int *val)
+{
+    char buf[128];
+    int n = receberLinha(sock, buf, sizeof(buf));
+    if (n <= 0) return n;
+
+    if (sscanf(buf, "UPDATE %d %d %d", lin, col, val) == 3)
+        return 1;
+    return 0;
+}
+
+/* ============================================================
+   RESULTADO
+   ============================================================ */
 
 int enviarResultadoOK(int sock, int idJogo)
 {
@@ -158,25 +220,27 @@ int enviarResultadoErros(int sock, int idJogo, int erros)
 
 int receberResultado(int sock, int *idJogo, int *erros)
 {
-    char buffer[128];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[128];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    if (strstr(buffer, "OK")) {
-        sscanf(buffer, "RESULTADO %d OK", idJogo);
+    if (strstr(buf, "OK")) {
+        sscanf(buf, "RESULTADO %d OK", idJogo);
         *erros = 0;
         return 1;
     }
 
-    if (strstr(buffer, "ERROS")) {
-        sscanf(buffer, "RESULTADO %d ERROS %d", idJogo, erros);
+    if (strstr(buf, "ERROS")) {
+        sscanf(buf, "RESULTADO %d ERROS %d", idJogo, erros);
         return 1;
     }
 
     return -1;
 }
 
-/* ================= SAIR ================= */
+/* ============================================================
+   SAIR
+   ============================================================ */
 
 int enviarSair(int sock)
 {
@@ -185,17 +249,15 @@ int enviarSair(int sock)
 
 int receberSairServidor(int sock)
 {
-    char buffer[64];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[64];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
-
-    if (strncmp(buffer, "SAIR", 4) == 0)
-        return 1;
-
-    return -1;
+    return (strncmp(buf, "SAIR", 4) == 0);
 }
 
-/* ================= ERRO ================= */
+/* ============================================================
+   ERRO
+   ============================================================ */
 
 int enviarErro(int sock, const char *descricao)
 {
@@ -204,51 +266,16 @@ int enviarErro(int sock, const char *descricao)
     return enviarMensagem(sock, msg);
 }
 
-int receberErro(int sock, char *descricao, int maxLen)
+int receberErro(int sock, char *descricao, int max)
 {
-    char buffer[256];
-    int n = receberMensagem(sock, buffer, sizeof(buffer));
+    char buf[256];
+    int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
-    if (strncmp(buffer, "ERRO", 4) != 0)
+    if (strncmp(buf, "ERRO", 4) != 0)
         return -1;
 
-    char *p = buffer + 5;
-    char *nl = strchr(p, '\n');
-    if (nl) *nl = '\0';
-
-    strncpy(descricao, p, maxLen - 1);
-    descricao[maxLen - 1] = '\0';
-
+    strncpy(descricao, buf + 5, max - 1);
+    descricao[max - 1] = '\0';
     return 1;
-}
-
-/* ================= RANKING (COMPETIÇÃO) ================= */
-
-#include "../comum/util.h"
-
-int receberRankingHeader(int sock, int *nEntradas)
-{
-    char buffer[128];
-
-    int n = readline(sock, buffer, sizeof(buffer));
-    if (n <= 0) return n;
-
-    if (sscanf(buffer, "RANKING %d", nEntradas) == 1)
-        return 1;
-
-    return -1;
-}
-
-int receberRankingLinha(int sock, int *idCliente, double *tempo)
-{
-    char buffer[128];
-
-    int n = readline(sock, buffer, sizeof(buffer));
-    if (n <= 0) return n;
-
-    if (sscanf(buffer, "%d %lf", idCliente, tempo) == 2)
-        return 1;
-
-    return -1;
 }

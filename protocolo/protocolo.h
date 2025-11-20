@@ -1,66 +1,58 @@
 #ifndef PROTOCOLO_H
 #define PROTOCOLO_H
 
-/* ======== BASE ======== */
-
 int enviarMensagem(int sock, const char *msg);
-int receberMensagem(int sock, char *buffer, int max);
 
-/* ======== PEDIR JOGO / MODOS ======== */
+/* ---- Pedir jogo ---- */
+int pedirJogoNormal(int sock, const char *idCliente);
+int pedirJogoCompeticao(int sock, const char *idCliente, int equipa);
+int receberPedidoJogoServidorModo(int sock, char *idOut, int max, int *modoOut, int *equipaOut);
 
-/* Versão antiga mantida para compatibilidade – trata como modo normal */
-int pedirJogo(int sock, const char *idClienteBase);
+/* ---- ID atribuído ---- */
+int enviarIdAtribuidoServidor(int sock, int id);
+int receberIdAtribuidoCliente(int sock, int *id);
 
-/* Versões novas explícitas */
-int pedirJogoNormal(int sock, const char *idClienteBase);
-int pedirJogoCompeticao(int sock, const char *idClienteBase);
-
-/* Versão antiga (servidor) – ainda existe, mas sem informação de modo */
-int receberPedidoJogoServidor(int sock, char *idClienteBase, int max);
-
-/* Versão nova – devolve modo:
-   modo = 0 → normal
-   modo = 1 → competição
-*/
-int receberPedidoJogoServidorModo(int sock, char *idClienteBase, int max, int *modo);
-
-/* ======== ID_ATRIBUIDO ======== */
-
-int enviarIdAtribuidoServidor(int sock, int idNovo);
-int receberIdAtribuidoCliente(int sock, int *idNovo);
-
-/* ======== JOGO ======== */
-
+/* ---- Envio do jogo ---- */
 int enviarJogoServidor(int sock, int idJogo, const char *tab);
 int receberJogo(int sock, int *idJogo, char *tab);
 
-/* ======== SOLUCAO ======== */
-
+/* ---- Solução final ---- */
 int enviarSolucao(int sock, int idJogo, const char *sol);
 int receberSolucaoServidor(int sock, int *idJogo, char *sol);
 
-/* ======== RESULTADO ======== */
+/* ---- SET/UPDATE antigo (ainda usamos para autocomplete opcional) ---- */
+int enviarSET(int sock, int lin, int col, int val);
+int receberSET(int sock, int *lin, int *col, int *val);
+int enviarUPDATE(int sock, int lin, int col, int val);
+int receberUPDATE(int sock, int *lin, int *col, int *val);
 
+/* ---- Resultado ---- */
 int enviarResultadoOK(int sock, int idJogo);
 int enviarResultadoErros(int sock, int idJogo, int erros);
 int receberResultado(int sock, int *idJogo, int *erros);
 
-/* ======== SAIR ======== */
-
+/* ---- Sair ---- */
 int enviarSair(int sock);
 int receberSairServidor(int sock);
 
-/* ======== ERRO ======== */
-
+/* ---- ERRO ---- */
 int enviarErro(int sock, const char *descricao);
-int receberErro(int sock, char *descricao, int maxLen);
+int receberErro(int sock, char *descricao, int max);
 
-/* ================== RANKING (Competição) ================== */
+/* ============================================================
+   NOVO PARA SINCRONIZAÇÃO FORTE
+   ============================================================ */
 
-/* Lê a linha "RANKING N" */
-int receberRankingHeader(int sock, int *nEntradas);
+/* Cliente → Servidor: envia tabuleiro completo */
+int enviarSyncTabuleiro(int sock, const char tab81[82]);
 
-/* Lê linhas "id tempo" */
-int receberRankingLinha(int sock, int *idCliente, double *tempo);
+/* Cliente → Servidor: pede tabuleiro oficial */
+int enviarPedirTabuleiro(int sock);
+
+/* Servidor → Cliente: envia tabuleiro oficial */
+int enviarTabuleiroEquipa(int sock, const char tab81[82]);
+
+/* Cliente → ...: recebe tabuleiro oficial */
+int receberTabuleiroEquipa(int sock, char tabOut[82]);
 
 #endif

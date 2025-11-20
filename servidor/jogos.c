@@ -51,6 +51,8 @@ const Jogo *obterJogoProximo(void)
 
     if (totalJogos == 0) return NULL;
 
+    printf("[DEBUG] A devolver jogo com índice %d (ID=%d)\n", indice, listaJogos[indice].id);
+
     const Jogo *j = &listaJogos[indice];
 
     indice = (indice + 1) % totalJogos;

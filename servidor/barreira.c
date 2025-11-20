@@ -1,44 +1,50 @@
-#include <pthread.h>
-#include <semaphore.h>
-
+// servidor/barreira.c
 #include "barreira.h"
-#include "sincronizacao.h"
-#include "ranking.h"
-#include "jogos.h"     // <-- Necessário
+#include <pthread.h>
+#include <stdio.h>
 
-pthread_mutex_t mutexBarreira = PTHREAD_MUTEX_INITIALIZER;
-sem_t semBarreira;
-int contadorCompeticao = 0;
+static pthread_mutex_t mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
 
-/* variável visível em todo o servidor */
-const Jogo *jogoCompeticao = NULL;
+static int contador = 0;
+static int limite = 0;
+static int ativa = 0;
 
-void inicializarBarreira(void)
+/* ============================================================
+   Inicializar barreira
+   ============================================================ */
+void inicializarBarreira(int max)
 {
-    sem_init(&semBarreira, 0, 0);
+    pthread_mutex_lock(&mx);
+    contador = 0;
+    limite = max;
+    ativa = 1;
+    pthread_mutex_unlock(&mx);
+
+    printf("[DEBUG] Barreira inicializada para %d jogadores.\n", max);
 }
 
-void barreiraCompeticao(void)
+/* ============================================================
+   Entrar na barreira — bloqueia até todos chegarem
+   ============================================================ */
+void entrarBarreira(void)
 {
-    pthread_mutex_lock(&mutexBarreira);
+    pthread_mutex_lock(&mx);
 
-    contadorCompeticao++;
-
-    if (contadorCompeticao == 1) {
-        jogoCompeticao = obterJogoProximo();
-        limparResultadosCompeticao();
-    }
-
-    if (contadorCompeticao == GRUPO_COMPETICAO) {
-
-        for (int i = 0; i < GRUPO_COMPETICAO - 1; i++)
-            sem_post(&semBarreira);
-
-        contadorCompeticao = 0;
-        pthread_mutex_unlock(&mutexBarreira);
+    if (!ativa) {
+        pthread_mutex_unlock(&mx);
         return;
     }
 
-    pthread_mutex_unlock(&mutexBarreira);
-    sem_wait(&semBarreira);
+    contador++;
+    //printf("[DEBUG] Barreira: %d/%d chegaram.\n", contador, limite);
+
+    if (contador >= limite) {
+        ativa = 0;  // desbloquear uso futuro
+        pthread_cond_broadcast(&cv);  // libertar todos
+    } else {
+        pthread_cond_wait(&cv, &mx);
+    }
+
+    pthread_mutex_unlock(&mx);
 }

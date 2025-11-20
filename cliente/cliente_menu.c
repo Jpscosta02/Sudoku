@@ -1,16 +1,20 @@
 // cliente/cliente_menu.c
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <errno.h>
 
 #include "../comum/logs.h"
+#include "../protocolo/protocolo.h"
 #include "cliente_menu.h"
 #include "cliente_tabuleiro.h"
 #include "cliente_ui.h"
 
-/* ================================================
-   Auxiliares
-   ================================================ */
-
+/* =======================================================
+   LER LINHA
+   ======================================================= */
 static void lerLinha(char *buf, int max)
 {
     if (fgets(buf, max, stdin) == NULL) {
@@ -22,27 +26,118 @@ static void lerLinha(char *buf, int max)
         buf[len - 1] = '\0';
 }
 
-static int lerInt(const char *prompt, int min, int max, int *ok)
+/* =======================================================
+   LER INTEIRO (com aplicação de updates antes de cada input)
+   ======================================================= */
+static int lerIntComUpdates(const char *prompt,
+                            int min, int max,
+                            int *ok,
+                            int sock,
+                            int modoCompeticao,
+                            int tab[9][9],
+                            char tabuleiroStr[82]);
+
+/* =======================================================
+   buffer persistente para UPDATEs
+   ======================================================= */
+static char bufUpdate[2048];
+static int lenBuf = 0;
+
+/* =======================================================
+   aplicar updates NÃO bloqueante
+   ======================================================= */
+static void aplicarUpdatesPendentes(int sock,
+                                    int tab[9][9],
+                                    char tabuleiroStr[82])
 {
-    char linha[128];
+    char tmp[256];
+
+    while (1) {
+        ssize_t n = recv(sock, tmp, sizeof(tmp), MSG_DONTWAIT);
+
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+            break;
+        }
+        if (n == 0)
+            break;
+
+        if (lenBuf + n >= sizeof(bufUpdate))
+            lenBuf = 0;
+
+        memcpy(bufUpdate + lenBuf, tmp, n);
+        lenBuf += n;
+
+        int start = 0;
+        while (start < lenBuf) {
+            int i;
+            for (i = start; i < lenBuf && bufUpdate[i] != '\n'; i++);
+
+            if (i == lenBuf)
+                break;
+
+            int lineLen = i - start;
+            if (lineLen > 0) {
+                char line[256];
+                int copyLen = (lineLen < 255 ? lineLen : 255);
+                memcpy(line, bufUpdate + start, copyLen);
+                line[copyLen] = '\0';
+
+                int lin, col, val;
+                if (sscanf(line, "UPDATE %d %d %d", &lin, &col, &val) == 3) {
+                    if (lin >= 0 && lin < 9 &&
+                        col >= 0 && col < 9 &&
+                        val >= 0 && val <= 9)
+                    {
+                        tab[lin][col] = val;
+                    }
+                }
+            }
+            start = i + 1;
+        }
+
+        if (start > 0 && start < lenBuf) {
+            memmove(bufUpdate, bufUpdate + start, lenBuf - start);
+            lenBuf -= start;
+        } else if (start >= lenBuf)
+            lenBuf = 0;
+    }
+
+    matrizParaString(tab, tabuleiroStr);
+}
+
+/* =======================================================
+   LER INTEIRO → versão final
+   ======================================================= */
+static int lerIntComUpdates(const char *prompt,
+                            int min, int max,
+                            int *ok,
+                            int sock,
+                            int modoCompeticao,
+                            int tab[9][9],
+                            char tabuleiroStr[82])
+{
+    char linha[64];
     int v;
 
     while (1) {
+
+        if (modoCompeticao)
+            aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+
         printf("%s", prompt);
         lerLinha(linha, sizeof(linha));
 
-        if (linha[0] == '\0') {
-            *ok = 0;
-            return 0;
-        }
+        if (linha[0] == '\0') { *ok = 0; return 0; }
 
         if (sscanf(linha, "%d", &v) != 1) {
-            printf(COR_ERRO "Valor inválido.\n" COR_RESET);
+            printf("Valor inválido.\n");
             continue;
         }
 
         if (v < min || v > max) {
-            printf(COR_ERRO "Valor fora dos limites (%d-%d).\n" COR_RESET, min, max);
+            printf("Valor fora dos limites (%d-%d)\n", min, max);
             continue;
         }
 
@@ -51,172 +146,175 @@ static int lerInt(const char *prompt, int min, int max, int *ok)
     }
 }
 
-static void validarLocal(int tab[9][9])
-{
-    int e1 = validarLinhas(tab);
-    int e2 = validarColunas(tab);
-    int e3 = validarQuadrados(tab);
-
-    if (e1 == 0 && e2 == 0 && e3 == 0) {
-        printf(COR_INFO "Validação local: não foram detetados conflitos.\n" COR_RESET);
-    } else {
-        printf(COR_ERRO "Conflitos detetados no Sudoku.\n" COR_RESET);
-    }
-}
-
-/* =================================================
-   MENU SUDOKU — função principal do cliente
-   ================================================= */
-
+/* =======================================================
+   MENU SUDOKU — FINAL
+   ======================================================= */
 int menuSudoku(char solucaoOut[82],
-               char tabuleiroStr[82],        // tabuleiro persistente
-               const char *solucaoCorreta,   // para autocomplete (opção 6)
+               char tabuleiroStr[82],
+               const char *solucaoCorreta,
                const char *ficheiroLog,
-               int idAtribuido)
+               int idAtribuido,
+               int sock,
+               int modoCompeticao)
 {
     int tab[9][9];
     int original[9][9];
-
-    // Construir matriz a partir da string atual
     inicializarTabuleiro(tabuleiroStr, tab, original);
 
     while (1) {
 
+        if (modoCompeticao)
+            aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+
         mostrarTabuleiroColorido(tab, original);
 
-        printf(COR_MENU "===== MENU SUDOKU =====\n" COR_RESET);
-        printf(COR_MENU "1. Inserir valor\n" COR_RESET);
-        printf(COR_MENU "2. Apagar valor\n" COR_RESET);
-        printf(COR_MENU "3. Validar localmente\n" COR_RESET);
-        printf(COR_MENU "4. Enviar solução\n" COR_RESET);
-        printf(COR_MENU "5. Sair sem enviar\n" COR_RESET);
-        printf(COR_MENU "6. Preencher solução automaticamente (TESTE)\n" COR_RESET);
-        printf(COR_MENU "=======================\n" COR_RESET);
+        printf("===== MENU SUDOKU =====\n");
+        printf("1. Inserir valor\n");
+        printf("2. Apagar valor\n");
+        printf("3. Validar localmente\n");
+        printf("4. Enviar solução\n");
+        printf("5. Sair sem enviar\n");
+        printf("6. Preencher automaticamente (TESTE)\n");
+        printf("========================\n");
 
         int ok;
-        int op = lerInt("Escolha uma opção (1-6): ", 1, 6, &ok);
-        if (!ok) {
-            printf(COR_ERRO "Entrada inválida.\n" COR_RESET);
-            continue;
-        }
+        int op = lerIntComUpdates("Opção (1-6): ", 1, 6, &ok,
+                                  sock, modoCompeticao, tab, tabuleiroStr);
+        if (!ok) continue;
 
-        switch (op) {
+        /* =======================================================
+           1 — INSERIR
+           ======================================================= */
+        if (op == 1) {
+            int lin = lerIntComUpdates("Linha (1-9): ", 1, 9, &ok,
+                                       sock, modoCompeticao, tab, tabuleiroStr);
+            if (!ok) continue;
 
-        /* ===========================
-           1. Inserir valor
-           =========================== */
-        case 1: {
-            int lin = lerInt("Linha (1-9): ", 1, 9, &ok); if (!ok) break;
-            int col = lerInt("Coluna (1-9): ", 1, 9, &ok); if (!ok) break;
-            int val = lerInt("Valor (1-9): ", 1, 9, &ok); if (!ok) break;
+            int col = lerIntComUpdates("Coluna (1-9): ", 1, 9, &ok,
+                                       sock, modoCompeticao, tab, tabuleiroStr);
+            if (!ok) continue;
+
+            int val = lerIntComUpdates("Valor (1-9): ", 1, 9, &ok,
+                                       sock, modoCompeticao, tab, tabuleiroStr);
+            if (!ok) continue;
 
             lin--; col--;
 
             if (inserirValor(tab, original, lin, col, val) == 0) {
-                matrizParaString(tab, tabuleiroStr); // atualizar persistente
-                printf(COR_INFO "Valor inserido com sucesso.\n" COR_RESET);
+                matrizParaString(tab, tabuleiroStr);
                 registarEventoID(ficheiroLog, idAtribuido, "Valor inserido");
+
+                if (modoCompeticao) {
+                    enviarSET(sock, lin, col, val);
+                    aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+                }
+
             } else {
-                printf(COR_ERRO "Não podes inserir nesta célula.\n" COR_RESET);
-                registarEventoID(ficheiroLog, idAtribuido, "Falha inserir");
+                printf("Não podes inserir nessa célula.\n");
             }
-            break;
+
+            continue;
         }
 
-        /* ===========================
-           2. Apagar valor
-           =========================== */
-        case 2: {
-            int lin = lerInt("Linha (1-9): ", 1, 9, &ok); if (!ok) break;
-            int col = lerInt("Coluna (1-9): ", 1, 9, &ok); if (!ok) break;
+        /* =======================================================
+           2 — APAGAR
+           ======================================================= */
+        if (op == 2) {
+            int lin = lerIntComUpdates("Linha (1-9): ", 1, 9, &ok,
+                                       sock, modoCompeticao, tab, tabuleiroStr);
+            if (!ok) continue;
+
+            int col = lerIntComUpdates("Coluna (1-9): ", 1, 9, &ok,
+                                       sock, modoCompeticao, tab, tabuleiroStr);
+            if (!ok) continue;
 
             lin--; col--;
 
             if (apagarValor(tab, original, lin, col) == 0) {
-                matrizParaString(tab, tabuleiroStr); // atualizar persistente
-                printf(COR_INFO "Célula apagada.\n" COR_RESET);
+                matrizParaString(tab, tabuleiroStr);
                 registarEventoID(ficheiroLog, idAtribuido, "Valor apagado");
+
+                if (modoCompeticao) {
+                    enviarSET(sock, lin, col, 0);
+                    aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+                }
+
             } else {
-                printf(COR_ERRO "Não podes apagar esta célula.\n" COR_RESET);
-                registarEventoID(ficheiroLog, idAtribuido, "Falha apagar");
+                printf("Não podes apagar essa célula.\n");
             }
-            break;
+
+            continue;
         }
 
-        /* ===========================
-           3. Validação local
-           =========================== */
-        case 3:
-            validarLocal(tab);
-            registarEventoID(ficheiroLog, idAtribuido, "Validação local");
-            printf("Pressiona ENTER para continuar...");
-            {
-                char tmp[16];
-                lerLinha(tmp, sizeof(tmp));
-            }
-            break;
+        /* =======================================================
+           3 — VALIDAR LOCAL
+           ======================================================= */
+        if (op == 3) {
+            if (modoCompeticao)
+                aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
 
-        /* ===========================
-           4. Enviar solução
-           =========================== */
-        case 4: {
+            int e1 = validarLinhas(tab);
+            int e2 = validarColunas(tab);
+            int e3 = validarQuadrados(tab);
 
-            matrizParaString(tab, solucaoOut);   // preparar solução final
-            matrizParaString(tab, tabuleiroStr); // atualizar persistente
+            if (e1 == 0 && e2 == 0 && e3 == 0)
+                printf("Sem erros locais.\n");
+            else
+                printf("Foram detetados erros locais.\n");
 
-            int vazias = 0;
-            for (int i = 0; i < 81; i++)
-                if (solucaoOut[i] == '0')
-                    vazias++;
+            continue;
+        }
 
-            if (vazias > 0) {
-                printf(COR_ERRO "Existem %d células vazias.\n" COR_RESET, vazias);
-                printf("Enviar mesmo assim? (s/n): ");
+        /* =======================================================
+           4 — ENVIAR SOLUÇÃO
+           ======================================================= */
+        if (op == 4) {
+            if (modoCompeticao)
+                aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
 
-                char resp[16];
-                lerLinha(resp, sizeof(resp));
-                if (resp[0] != 's' && resp[0] != 'S')
-                    break;
-            }
-
+            matrizParaString(tab, solucaoOut);
+            matrizParaString(tab, tabuleiroStr);
             registarEventoID(ficheiroLog, idAtribuido, "Solução enviada");
-            return 1; // enviar ao servidor
+            return 1;
         }
 
-        /* ===========================
-           5. Sair sem enviar
-           =========================== */
-        case 5:
+        /* =======================================================
+           5 — SAIR
+           ======================================================= */
+        if (op == 5) {
             registarEventoID(ficheiroLog, idAtribuido, "Sair sem enviar");
             return 0;
-
-        /* ===========================
-           6. Preencher solução automaticamente (TESTE)
-           =========================== */
-        case 6: {
-            if (!solucaoCorreta || strlen(solucaoCorreta) < 81) {
-                printf(COR_ERRO "Solução correta indisponível para autocomplete.\n" COR_RESET);
-                break;
-            }
-
-            // Preencher tabuleiro com solucaoCorreta (81 chars)
-            for (int i = 0; i < 9; i++) {
-                for (int j = 0; j < 9; j++) {
-                    char c = solucaoCorreta[i * 9 + j];
-                    if (c >= '1' && c <= '9')
-                        tab[i][j] = c - '0';
-                    else
-                        tab[i][j] = 0;
-                }
-            }
-
-            matrizParaString(tab, tabuleiroStr); // atualizar persistente
-            printf(COR_INFO "Tabuleiro preenchido automaticamente com a solução (TESTE).\n" COR_RESET);
-            registarEventoID(ficheiroLog, idAtribuido, "Autocomplete com solução");
-            break;
         }
 
-        } // switch
+        /* =======================================================
+           6 — AUTO COMPLETE
+           ======================================================= */
+        if (op == 6) {
+            if (!solucaoCorreta || strlen(solucaoCorreta) < 81) {
+                printf("Solução indisponível.\n");
+                continue;
+            }
+
+            if (modoCompeticao)
+                aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+
+            for (int i = 0; i < 9; i++)
+                for (int j = 0; j < 9; j++)
+                    tab[i][j] = solucaoCorreta[i*9 + j] - '0';
+
+            matrizParaString(tab, tabuleiroStr);
+
+            if (modoCompeticao) {
+                for (int i = 0; i < 9; i++)
+                    for (int j = 0; j < 9; j++)
+                        enviarSET(sock, i, j, tab[i][j]);
+
+                aplicarUpdatesPendentes(sock, tab, tabuleiroStr);
+            }
+
+            continue;
+        }
+
     } // while
 
     return 0;

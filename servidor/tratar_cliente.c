@@ -2,164 +2,208 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <time.h>
 
-#include "../protocolo/protocolo.h"
+#include "../comum/util.h"
 #include "../comum/logs.h"
+#include "../protocolo/protocolo.h"
 
 #include "tratar_cliente.h"
 #include "gestor_ids.h"
 #include "jogos.h"
-#include "sudoku.h"
-
-#include "sincronizacao.h"
-#include "barreira.h"
+#include "clientes_ligados.h"
 #include "validacao_fifo.h"
 #include "ranking.h"
+#include "equipas.h"
+#include "barreira.h"
+#include "servidor_tcp.h"
+
+#define MODO_NORMAL      1
+#define MODO_COMPETICAO  2
+
+extern sem_t semClientes;
 
 /* ============================================================
-   FUNÇÃO PRINCIPAL DA THREAD DE CADA CLIENTE
+   LOOP PRINCIPAL DO CLIENTE
    ============================================================ */
+static void loopReceberJogo(int sock,
+                            int modo,
+                            int equipa,
+                            const Jogo *jogo,
+                            int idCliente)
+{
+    char buffer[256];
+    char solucaoRecebida[82];
+    int idJogo = jogo->id;
 
+    while (1) {
+
+        int n = readline(sock, buffer, sizeof(buffer));
+        if (n <= 0) {
+            printf("[DEBUG] Cliente %d desconectou.\n", idCliente);
+            return;
+        }
+
+        if (buffer[n - 1] == '\n')
+            buffer[n - 1] = '\0';
+
+        /* -------- SET -------- */
+        if (strncmp(buffer, "SET", 3) == 0) {
+            int lin, col, val;
+
+            if (sscanf(buffer, "SET %d %d %d", &lin, &col, &val) == 3) {
+
+                printf("[DEBUG] (cliente %d) RECEBI SET (%d,%d)=%d\n",
+                       idCliente, lin, col, val);
+
+                if (modo == MODO_COMPETICAO) {
+
+                    printf("[DEBUG] UPDATE equipa=%d origem=%d\n",
+                           equipa, idCliente);
+
+                    /* CORREÇÃO: enviarUpdateEquipa(equipa, idOrigem, lin, col, val) */
+                    enviarUpdateEquipa(equipa, idCliente, lin, col, val);
+                }
+            }
+            continue;
+        }
+
+        /* -------- SOLUCAO -------- */
+        if (strncmp(buffer, "SOLUCAO", 7) == 0) {
+
+            int idRecebido;
+            if (sscanf(buffer, "SOLUCAO %d %81s",
+                       &idRecebido, solucaoRecebida) == 2)
+            {
+                int erros =
+                    validarSudokuFIFO(solucaoRecebida, jogo->solucao);
+
+                if (erros == 0) {
+
+                    if (modo == MODO_COMPETICAO) {
+
+                        time_t tFim = time(NULL);
+                        double tempoEquipa = 0.0;
+
+                        int marcou =
+                            registarFimEquipa(equipa, tFim, &tempoEquipa);
+
+                        if (marcou)
+                            registarResultadoCompeticao(idCliente,
+                                                        tempoEquipa);
+                    }
+
+                    enviarResultadoOK(sock, idJogo);
+                }
+                else {
+                    enviarResultadoErros(sock, idJogo, erros);
+                }
+            }
+            continue;
+        }
+
+        /* -------- SAIR -------- */
+        if (strncmp(buffer, "SAIR", 4) == 0) {
+            printf("[DEBUG] Cliente %d pediu SAIR.\n", idCliente);
+            return;
+        }
+    }
+}
+
+/* ============================================================
+   THREAD PRINCIPAL DO CLIENTE
+   ============================================================ */
 void *tratarCliente(void *arg)
 {
-    int sock = *(int *)arg;
+    int sock = *(int*)arg;
     free(arg);
 
     char idBase[64];
-    int idAtribuido;
-    char ficheiroLogCliente[128];
-
-    /* 1) receber pedido de jogo */
     int modo = 0;
+    int equipa = 0;
 
-    if (receberPedidoJogoServidorModo(sock, idBase, sizeof(idBase), &modo) <= 0) {
+    printf("[DEBUG] Thread criada (sock=%d)\n", sock);
+
+    /* 1) Receber pedido de jogo */
+    if (receberPedidoJogoServidorModo(sock,
+                                      idBase, sizeof(idBase),
+                                      &modo, &equipa) <= 0)
+    {
         close(sock);
         sem_post(&semClientes);
         return NULL;
     }
 
-    /* 2) atribuir ID */
-    idAtribuido = atribuirIdCliente();
+    /* 2) Atribuir ID interno */
+    int idCliente = atribuirIdCliente();
+    enviarIdAtribuidoServidor(sock, idCliente);
 
-    snprintf(ficheiroLogCliente, sizeof(ficheiroLogCliente),
-             "logs/cliente_%d.log", idAtribuido);
+    /* 3) Competição */
+    if (modo == MODO_COMPETICAO) {
 
-    registarEventoID(ficheiroLogCliente, idAtribuido,
-                     "Cliente conectado");
+        registarClienteLigado(idCliente, equipa, sock);
+        registarEntradaJogador(equipa);
 
-    enviarIdAtribuidoServidor(sock, idAtribuido);
-
-    /* 3) escolher jogo */
-    const Jogo *jogo = NULL;
-
-    if (modo == 0) {
-        /* JOGO NORMAL */
-        jogo = obterJogoProximo();
-
-        if (!jogo) {
-            enviarErro(sock, "Sem jogos disponíveis");
-            close(sock);
-            libertarIdCliente(idAtribuido);
-            sem_post(&semClientes);
-            return NULL;
-        }
-
-        enviarJogoServidor(sock, jogo->id, jogo->jogo);
-
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Jogo normal enviado ao cliente");
-    }
-    else {
-        /* MODO COMPETIÇÃO */
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Cliente entrou em competição");
-
-        barreiraCompeticao();   // sincroniza clientes
-
-        jogo = jogoCompeticao;
-
-        if (!jogo) {
-            enviarErro(sock, "Erro interno: jogoCompeticao = NULL");
-            close(sock);
-            libertarIdCliente(idAtribuido);
-            sem_post(&semClientes);
-            return NULL;
-        }
-
-        enviarJogoServidor(sock, jogo->id, jogo->jogo);
-
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Jogo de competição enviado");
+        printf("[DEBUG] Cliente %d A ENTRAR NA BARREIRA...\n", idCliente);
+        entrarBarreira();
+        printf("[DEBUG] Cliente %d SAIU DA BARREIRA!\n", idCliente);
     }
 
-    /* MARCAR INÍCIO DO TEMPO */
-    time_t tInicio = time(NULL);
-
-    /* 4) receber SOLUCAO do cliente */
-    int idJogoSol;
-    char solCliente[82];
-
-    if (receberSolucaoServidor(sock, &idJogoSol, solCliente) <= 0) {
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Cliente saiu antes de enviar solução");
-
+    /* 4) Obter jogo */
+    const Jogo *jogo = obterJogoProximo();
+    if (!jogo) {
+        enviarErro(sock, "Sem jogos");
         close(sock);
-        libertarIdCliente(idAtribuido);
         sem_post(&semClientes);
         return NULL;
     }
 
-    registarEventoID(ficheiroLogCliente, idAtribuido,
-                     "SOLUCAO recebida");
-
-    /* 5) VALIDAR via validador FIFO */
-    int erros = validarSudokuFIFO(solCliente, jogo->solucao);
-
-    /* MARCAR FIM DO TEMPO */
-    time_t tFim = time(NULL);
-    double tempoDecorrido = difftime(tFim, tInicio);
-
-    /* REGISTAR RESULTADO (só o tempo) */
-    registarResultadoCompeticao(idAtribuido, tempoDecorrido);
-
-    /* 6) enviar resultado */
-    if (erros == 0) {
-        enviarResultadoOK(sock, jogo->id);
-
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Sudoku correto (0 erros)");
-    }
-    else {
-        enviarResultadoErros(sock, jogo->id, erros);
-
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Sudoku com %d erro(s)", erros);
-        registarEventoID(ficheiroLogCliente, idAtribuido, msg);
+    /* 5) Enviar tabuleiro */
+    if (enviarJogoServidor(sock, jogo->id, jogo->jogo) <= 0) {
+        close(sock);
+        sem_post(&semClientes);
+        return NULL;
     }
 
-    /* 7) enviar ranking — APENAS se acertou */
-    if (modo == 1 && erros == 0) {
-        enviarRankingCompeticao(sock);
-    }
+    /* 6) Loop */
+    loopReceberJogo(sock, modo, equipa, jogo, idCliente);
 
-    /* 8) esperar comando SAIR */
-    int sair = receberSairServidor(sock);
+    /* 7) Cleanup */
+    if (modo == MODO_COMPETICAO)
+        removerClienteLigado(idCliente);
 
-    if (sair == 1) {
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Cliente enviou SAIR");
-    } else {
-        registarEventoID(ficheiroLogCliente, idAtribuido,
-                         "Cliente desconectou sem SAIR");
-    }
-
-    /* 9) limpar */
+    libertarIdCliente(idCliente);
     close(sock);
-    libertarIdCliente(idAtribuido);
     sem_post(&semClientes);
-
     return NULL;
+}
+
+/* ============================================================
+   ACEITAR CLIENTES EM LOOP
+   ============================================================ */
+void aceitarClientes(int sockListen)
+{
+    printf("[DEBUG] A aceitar clientes...\n");
+
+    while (1) {
+
+        sem_wait(&semClientes);
+
+        int *pSock = malloc(sizeof(int));
+        *pSock = aceitarCliente(sockListen);
+
+        if (*pSock < 0) {
+            free(pSock);
+            sem_post(&semClientes);
+            continue;
+        }
+
+        pthread_t tid;
+        pthread_create(&tid, NULL, tratarCliente, pSock);
+        pthread_detach(tid);
+    }
 }
