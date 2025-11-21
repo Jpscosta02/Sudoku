@@ -27,6 +27,9 @@
 
 extern sem_t semClientes;
 
+static pthread_mutex_t mxJogoCompeticao = PTHREAD_MUTEX_INITIALIZER;
+static const Jogo *jogoCompeticao = NULL;
+
 /* ============================================================
    LOOP PRINCIPAL DO CLIENTE
    ============================================================ */
@@ -167,7 +170,27 @@ void *tratarCliente(void *arg)
     }
 
     /* 4) Obter jogo */
-    const Jogo *jogo = obterJogoProximo();
+    const Jogo *jogo = NULL;
+
+    if (modo == MODO_COMPETICAO) {
+        pthread_mutex_lock(&mxJogoCompeticao);
+
+        /* Escolher o jogo da competição apenas na 1ª thread */
+        if (jogoCompeticao == NULL) {
+            jogoCompeticao = obterJogoProximo();
+            if (jogoCompeticao) {
+                printf("[DEBUG] Jogo competição escolhido: ID=%d\n",
+                       jogoCompeticao->id);
+            }
+        }
+
+        jogo = jogoCompeticao;
+        pthread_mutex_unlock(&mxJogoCompeticao);
+    } else {
+        /* Modo normal continua a usar um jogo aleatório por cliente */
+        jogo = obterJogoProximo();
+    }
+
     if (!jogo) {
         enviarErro(sock, "Sem jogos");
         close(sock);
@@ -175,6 +198,7 @@ void *tratarCliente(void *arg)
         return NULL;
     }
 
+    
     /* 5) Enviar tabuleiro para o cliente */
     if (enviarJogoServidor(sock, jogo->id, jogo->jogo) <= 0) {
         close(sock);

@@ -1,7 +1,9 @@
 // servidor/jogos.c
 
-#include <stdio.h>     
-#include <string.h>     
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "jogos.h"
 
@@ -41,21 +43,22 @@ int carregarJogosServidor(const char *ficheiro)
 
     printf("Foram carregados %d jogo(s).\n", totalJogos);
 
-    return 1;
+    /* iniciar semente aleatória para escolha de jogos */
+    srand(time(NULL));
+
+    return (totalJogos > 0);
 }
 
-/* Devolve o próximo jogo */
+/* Devolve um jogo aleatório */
 const Jogo *obterJogoProximo(void)
 {
-    static int indice = 0;
+    if (totalJogos == 0)
+        return NULL;
 
-    if (totalJogos == 0) return NULL;
+    int indice = rand() % totalJogos;
 
-    printf("[DEBUG] A devolver jogo com índice %d (ID=%d)\n", indice, listaJogos[indice].id);
+    printf("[DEBUG] A devolver jogo com índice %d (ID=%d)\n",
+           indice, listaJogos[indice].id);
 
-    const Jogo *j = &listaJogos[indice];
-
-    indice = (indice + 1) % totalJogos;
-
-    return j;
+    return &listaJogos[indice];
 }
