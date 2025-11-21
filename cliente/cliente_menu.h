@@ -6,7 +6,9 @@ int menuSudoku(char solucaoOut[82],
                const char *solucaoCorreta,
                const char *ficheiroLog,
                int idAtribuido,
+               const char *nomeUtilizador,
                int sock,
                int modoCompeticao);
 
 #endif
+    
