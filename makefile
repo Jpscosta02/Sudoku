@@ -1,78 +1,70 @@
-# ==========================
-#  COMPILADOR E FLAGS
-# ==========================
-
 CC = gcc
 CFLAGS = -g -Wall -std=c99 -pthread
 
-# Includes das várias pastas
-INCLUDES = -Iservidor -Icliente -Iprotocolo -Icomum
+INCLUDES = -Iservidor -Icliente -Icomum -Iprotocolo
 
-# ==========================
-#  FICHEIROS COMUNS
-# ==========================
+# ========================
+#  OBJETOS DO SERVIDOR
+# ========================
 
-COMMON_SRCS = comum/util.c comum/logs.c comum/configuracao.c
-COMMON_OBJS = $(COMMON_SRCS:.c=.o)
+SERVIDOR_OBJS = \
+    servidor/servidor.o \
+    servidor/servidor_tcp.o \
+    servidor/tratar_cliente.o \
+    servidor/jogos.o \
+    servidor/gestor_ids.o \
+    servidor/sudoku.o \
+    servidor/sincronizacao.o \
+    servidor/barreira.o \
+    servidor/ranking.o \
+    servidor/validacao_fifo.o \
+    servidor/equipas.o \
+    servidor/clientes_ligados.o \
+    comum/util.o \
+    comum/logs.o \
+    comum/configuracao.o \
+    protocolo/protocolo.o
 
-# ==========================
-#  PROTOCOLO
-# ==========================
+# ========================
+#  OBJETOS DO CLIENTE
+# ========================
 
-PROTO_SRCS = protocolo/protocolo.c
-PROTO_OBJS = $(PROTO_SRCS:.c=.o)
+CLIENTE_OBJS = \
+	cliente/cliente.o \
+	cliente/cliente_tcp.o \
+	cliente/cliente_menu.o \
+	cliente/cliente_tabuleiro.o \
+	cliente/cliente_ui.o \
+	comum/util.o \
+	comum/logs.o \
+	comum/configuracao.o \
+	protocolo/protocolo.o
 
-# ==========================
-#  SERVIDOR
-# ==========================
-
-SERVER_SRCS = \
-    servidor/servidor.c \
-    servidor/servidor_tcp.c \
-    servidor/tratar_cliente.c \
-    servidor/jogos.c \
-    servidor/gestor_ids.c
-
-
-
-SERVER_OBJS = $(SERVER_SRCS:.c=.o)
-
-# ==========================
-#  CLIENTE
-# ==========================
-
-CLIENT_SRCS = \
-	cliente/cliente.c \
-	cliente/cliente_tcp.c
-
-CLIENT_OBJS = $(CLIENT_SRCS:.c=.o)
-
-# ==========================
-#  TARGETS PRINCIPAIS
-# ==========================
+# ========================
+#  PROGRAMAS
+# ========================
 
 all: servidor cliente
 
-# ---- BINÁRIO DO SERVIDOR ----
-servidor: $(SERVER_OBJS) $(COMMON_OBJS) $(PROTO_OBJS)
-	$(CC) $(CFLAGS) -o servidorApp $(SERVER_OBJS) $(COMMON_OBJS) $(PROTO_OBJS)
+servidor: $(SERVIDOR_OBJS)
+	$(CC) $(CFLAGS) -o servidorApp $(SERVIDOR_OBJS)
 
-# ---- BINÁRIO DO CLIENTE ----
-cliente: $(CLIENT_OBJS) $(COMMON_OBJS) $(PROTO_OBJS)
-	$(CC) $(CFLAGS) -o clienteApp $(CLIENT_OBJS) $(COMMON_OBJS) $(PROTO_OBJS)
+cliente: $(CLIENTE_OBJS)
+	$(CC) $(CFLAGS) -o clienteApp $(CLIENTE_OBJS)
 
-# ==========================
-#  REGRA GERAL PARA .c -> .o
-# ==========================
+# ========================
+#  REGRA GERAL DE COMPILAÇÃO
+# ========================
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-# ==========================
+# ========================
 #  LIMPEZA
-# ==========================
+# ========================
 
 clean:
-	rm -f servidor/*.o cliente/*.o comum/*.o protocolo/*.o
-	rm -f servidorApp clienteApp
-	rm -f logs/*.log
+	rm -f servidor/*.o cliente/*.o comum/*.o protocolo/*.o servidorApp clienteApp
+	rm -rf logs
+
+.PHONY: all clean servidor cliente
