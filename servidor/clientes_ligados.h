@@ -9,4 +9,7 @@ void removerClienteLigado(int idCliente);
 void enviarUpdateEquipa(int equipa, int idClienteOrigem,
                         int lin, int col, int val);
 
+void enviarRankingATodos(void);
+
+
 #endif

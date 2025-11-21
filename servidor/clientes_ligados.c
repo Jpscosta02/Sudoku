@@ -2,6 +2,7 @@
 #include "clientes_ligados.h"
 #include "../protocolo/protocolo.h"
 #include <pthread.h>
+#include "ranking.h"
 
 #define MAX_LIGADOS 32
 
@@ -82,3 +83,19 @@ void enviarUpdateEquipa(int equipa, int idClienteOrigem,
 
     pthread_mutex_unlock(&mx);
 }
+
+void enviarRankingATodos(void)
+{
+    pthread_mutex_lock(&mx);
+
+    for (int i = 0; i < MAX_LIGADOS; i++) {
+        if (lista[i].ativo) {
+            enviarRankingCompeticao(lista[i].sock);
+            enviarFimCompeticao(lista[i].sock); 
+        }
+    }
+
+    pthread_mutex_unlock(&mx);
+}
+
+

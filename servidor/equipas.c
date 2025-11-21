@@ -132,3 +132,19 @@ double obterTempoEquipa(int equipa)
 
     return t;
 }
+
+int todasEquipasTerminaram(void)
+{
+    pthread_mutex_lock(&mx);
+
+    for (int i = 0; i < MAX_EQUIPAS; i++) {
+        if (!equipas[i].sudokuTerminado) {
+            pthread_mutex_unlock(&mx);
+            return 0;
+        }
+    }
+
+    pthread_mutex_unlock(&mx);
+    return 1;
+}
+

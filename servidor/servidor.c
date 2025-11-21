@@ -13,7 +13,8 @@
 #include "jogos.h"
 #include "equipas.h"
 #include "clientes_ligados.h"
-#include "sincronizacao.h"   // ← ADICIONADO
+#include "sincronizacao.h"
+#include "ranking.h"    /* 👉 ranking das equipas */
 
 int main(int argc, char *argv[])
 {
@@ -35,10 +36,11 @@ int main(int argc, char *argv[])
        Inicializar módulos
        ====================== */
 
-    inicializarBarreira(cfg.maxClientes);          // barreira
-    inicializarSincronizacao(cfg.maxClientes);     // ← FALTAVA ISTO
+    inicializarBarreira(cfg.maxClientes);          // barreira de arranque
+    inicializarSincronizacao(cfg.maxClientes);     // semáforo de clientes
     inicializarEquipas();                          // estado das equipas
     inicializarClientesLigados();                  // lista de clientes ligados
+    limparResultadosCompeticao();                  // ranking vazio no início
 
     carregarJogosServidor(cfg.ficheiroJogos);
 

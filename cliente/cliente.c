@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <sys/socket.h>
 
 #include "../comum/configuracao.h"
 #include "../comum/logs.h"
@@ -65,6 +67,64 @@ static int lerOpcaoMenu(void)
 }
 
 /* ============================================================
+   Receber ranking completo até FIM_COMPETICAO
+   (para o jogador que enviou solução)
+   ============================================================ */
+static void receberRankingCompeticao(int sock)
+{
+    printf("\n⏳ A aguardar ranking final da competição...\n\n");
+
+    char buf[256];
+    static int pos = 1;
+
+    while (1) {
+        int n = recv(sock, buf, sizeof(buf) - 1, 0);
+        if (n <= 0) {
+            printf("Erro ao receber ranking.\n");
+            return;
+        }
+
+        buf[n] = '\0';
+        char *linha = strtok(buf, "\n");
+
+        while (linha) {
+
+            if (strncmp(linha, "RANKING", 7) == 0) {
+                int total;
+                if (sscanf(linha, "RANKING %d", &total) == 1) {
+                    printf("===== 🏆 RANKING FINAL (%d equipas) =====\n", total);
+                    pos = 1;
+                }
+            }
+            else if (isdigit((unsigned char)linha[0])) {
+                int eq;
+                double t;
+
+                if (sscanf(linha, "%d %lf", &eq, &t) == 2) {
+
+                    if (pos == 1)
+                        printf("\033[1;32m%2dº ► Equipa %d — %.2fs\033[0m\n", pos, eq, t);
+                    else if (pos == 2)
+                        printf("\033[1;33m%2dº ► Equipa %d — %.2fs\033[0m\n", pos, eq, t);
+                    else if (pos == 3)
+                        printf("\033[1;31m%2dº ► Equipa %d — %.2fs\033[0m\n", pos, eq, t);
+                    else
+                        printf("%2dº ► Equipa %d — %.2fs\n", pos, eq, t);
+
+                    pos++;
+                }
+            }
+            else if (strncmp(linha, "FIM_COMPETICAO", 14) == 0) {
+                printf("\n🏁 Competição terminada!\n");
+                return;
+            }
+
+            linha = strtok(NULL, "\n");
+        }
+    }
+}
+
+/* ============================================================
    MAIN
    ============================================================ */
 int main(int argc, char *argv[])
@@ -77,22 +137,15 @@ int main(int argc, char *argv[])
     char solucaoCorreta[82];
     char ficheiroLog[128];
 
-    printf("[DEBUG CLIENTE] Início do programa.\n");
-
     if (argc < 2) {
         printf("Uso: %s <config>\n", argv[0]);
         return 1;
     }
 
-    printf("[DEBUG CLIENTE] A carregar configuração...\n");
-
     if (!carregarConfiguracaoCliente(argv[1], &cfg)) {
         printf("Erro ao ler configuração.\n");
         return 1;
     }
-
-    printf("[DEBUG CLIENTE] Config carregada. IP=%s PORTA=%d ID=%s EQUIPA=%d\n",
-           cfg.ipServidor, cfg.porta, cfg.idCliente, cfg.equipa);
 
     snprintf(ficheiroLog, sizeof(ficheiroLog),
             "logs/cliente_%s.log", cfg.idCliente);
@@ -100,66 +153,41 @@ int main(int argc, char *argv[])
 
     /* menu inicial */
     int modo = lerOpcaoMenu();
-    printf("[DEBUG CLIENTE] Modo escolhido = %d\n", modo);
-
     if (modo == 3) return 0;
 
     /* ligar ao servidor */
-    printf("[DEBUG CLIENTE] A ligar ao servidor...\n");
     sock = ligarServidor(cfg.ipServidor, cfg.porta);
-
     if (sock < 0) {
         printf("Erro ao ligar ao servidor.\n");
         return 1;
     }
 
-    printf("[DEBUG CLIENTE] Ligação estabelecida (socket=%d).\n", sock);
-
-    /* ============================================================
-       ENVIAR PEDIDO DE JOGO
-       ============================================================ */
-
-    printf("[DEBUG CLIENTE] Vou enviar pedido de jogo...\n");
-
+    /* enviar pedido de jogo */
     int r;
     if (modo == 1)
         r = pedirJogoNormal(sock, cfg.idCliente);
     else
         r = pedirJogoCompeticao(sock, cfg.idCliente, cfg.equipa);
 
-    printf("[DEBUG CLIENTE] Resultado pedirJogo = %d\n", r);
-
     if (r <= 0) {
-        printf("[DEBUG CLIENTE] Falha ao enviar pedido de jogo.\n");
+        printf("Falha ao enviar pedido de jogo.\n");
         close(sock);
         return 1;
     }
 
-    printf("[DEBUG CLIENTE] Pedido enviado. Vou receber ID...\n");
-
     /* receber ID interno */
-    int res = receberIdAtribuidoCliente(sock, &idAtribuido);
-
-    printf("[DEBUG CLIENTE] receberIdAtribuidoCliente retornou %d\n", res);
-
-    if (res <= 0) {
+    if (receberIdAtribuidoCliente(sock, &idAtribuido) <= 0) {
         printf("Erro: não foi possível receber ID interno.\n");
         close(sock);
         return 1;
     }
 
-    printf("[DEBUG CLIENTE] ID interno recebido = %d\n", idAtribuido);
-
     /* receber tabuleiro */
-    printf("[DEBUG CLIENTE] Vou receber JOGO...\n");
-
     if (receberJogo(sock, &idJogo, tabuleiroStr) <= 0) {
         printf("Erro: não foi possível receber tabuleiro.\n");
         close(sock);
         return 1;
     }
-
-    printf("[DEBUG CLIENTE] Recebi jogo ID=%d\n", idJogo);
 
     /* ler solução correta */
     if (!obterSolucaoPorId(FICHEIRO_JOGOS, idJogo, solucaoCorreta))
@@ -169,8 +197,6 @@ int main(int argc, char *argv[])
     while (1) {
         char solucaoOut[82] = {0};
 
-        printf("[DEBUG CLIENTE] A entrar no menu Sudoku...\n");
-
         int enviar = menuSudoku(solucaoOut,
                                 tabuleiroStr,
                                 solucaoCorreta,
@@ -179,17 +205,27 @@ int main(int argc, char *argv[])
                                 sock,
                                 (modo == 2));
 
-        printf("[DEBUG CLIENTE] retorno menuSudoku = %d\n", enviar);
-
-        if (!enviar) {
-            printf("[DEBUG CLIENTE] ENVIAR=0 → Vou enviar SAIR\n");
+        /* ======================================================
+           CASO 1 — fim de competição (return -1)
+           ====================================================== */
+        if (enviar == -1) {
             enviarSair(sock);
             close(sock);
             return 0;
         }
 
-        /* enviar solução */
-        printf("[DEBUG CLIENTE] A enviar solução...\n");
+        /* ======================================================
+           CASO 2 — sair sem enviar solução (return 0)
+           ====================================================== */
+        if (enviar == 0) {
+            enviarSair(sock);
+            close(sock);
+            return 0;
+        }
+
+        /* ======================================================
+           CASO 3 — enviar solução (return 1)
+           ====================================================== */
 
         if (enviarSolucao(sock, idJogo, solucaoOut) <= 0) {
             printf("Erro: falhou enviar solução.\n");
@@ -200,6 +236,7 @@ int main(int argc, char *argv[])
 
         printf("[DEBUG CLIENTE] Solução enviada. Vou esperar resultado...\n");
 
+        /* esperar resultado */
         int erros;
         if (receberResultado(sock, &idJogo, &erros) <= 0) {
             printf("Erro: falhou receber resultado.\n");
@@ -208,12 +245,12 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        printf("[DEBUG CLIENTE] Resultado recebido. Erros=%d\n", erros);
-
         if (erros == 0) {
             printf("\n✔ Sudoku correto!\n");
-            if (modo == 2)
-                printf("(Competição por equipas)\n");
+
+            if (modo == 2) {
+                receberRankingCompeticao(sock);
+            }
 
             enviarSair(sock);
             close(sock);

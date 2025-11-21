@@ -36,4 +36,6 @@ int equipaJaTerminou(int equipa);
 /* Obtém tempo final da equipa */
 double obterTempoEquipa(int equipa);
 
+int todasEquipasTerminaram(void);
+
 #endif

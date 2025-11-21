@@ -61,11 +61,6 @@ static void loopReceberJogo(int sock,
                        idCliente, lin, col, val);
 
                 if (modo == MODO_COMPETICAO) {
-
-                    printf("[DEBUG] UPDATE equipa=%d origem=%d\n",
-                           equipa, idCliente);
-
-                    /* CORREÇÃO: enviarUpdateEquipa(equipa, idOrigem, lin, col, val) */
                     enviarUpdateEquipa(equipa, idCliente, lin, col, val);
                 }
             }
@@ -84,6 +79,8 @@ static void loopReceberJogo(int sock,
 
                 if (erros == 0) {
 
+                    int ultimo = 0;   /* 1 se esta equipa for a última a terminar */
+
                     if (modo == MODO_COMPETICAO) {
 
                         time_t tFim = time(NULL);
@@ -92,12 +89,28 @@ static void loopReceberJogo(int sock,
                         int marcou =
                             registarFimEquipa(equipa, tFim, &tempoEquipa);
 
-                        if (marcou)
-                            registarResultadoCompeticao(idCliente,
-                                                        tempoEquipa);
+                        if (marcou) {
+                            printf("[DEBUG] Equipa %d terminou em %.2f s\n",
+                                   equipa, tempoEquipa);
+
+                            /* Guardar no ranking */
+                            registarResultadoCompeticao(equipa, tempoEquipa);
+
+                            /* Verificar se TODAS as equipas já terminaram */
+                            if (todasEquipasTerminaram()) {
+                                ultimo = 1;
+                            }
+                        }
                     }
 
+                    /* Primeiro: enviar SEMPRE o RESULTADO para este cliente */
                     enviarResultadoOK(sock, idJogo);
+
+                    /* Só depois, e apenas uma vez (última equipa), enviar ranking a todos */
+                    if (modo == MODO_COMPETICAO && ultimo) {
+                        printf("[RANKING] Todas as equipas terminaram! A enviar ranking...\n");
+                        enviarRankingATodos();
+                    }
                 }
                 else {
                     enviarResultadoErros(sock, idJogo, erros);
@@ -128,7 +141,7 @@ void *tratarCliente(void *arg)
 
     printf("[DEBUG] Thread criada (sock=%d)\n", sock);
 
-    /* 1) Receber pedido de jogo */
+    /* 1) Receber pedido de jogo (inclui modo e equipa) */
     if (receberPedidoJogoServidorModo(sock,
                                       idBase, sizeof(idBase),
                                       &modo, &equipa) <= 0)
@@ -142,7 +155,7 @@ void *tratarCliente(void *arg)
     int idCliente = atribuirIdCliente();
     enviarIdAtribuidoServidor(sock, idCliente);
 
-    /* 3) Competição */
+    /* 3) Modo competição → registar equipa e esperar barreira */
     if (modo == MODO_COMPETICAO) {
 
         registarClienteLigado(idCliente, equipa, sock);
@@ -162,14 +175,14 @@ void *tratarCliente(void *arg)
         return NULL;
     }
 
-    /* 5) Enviar tabuleiro */
+    /* 5) Enviar tabuleiro para o cliente */
     if (enviarJogoServidor(sock, jogo->id, jogo->jogo) <= 0) {
         close(sock);
         sem_post(&semClientes);
         return NULL;
     }
 
-    /* 6) Loop */
+    /* 6) Loop de interação */
     loopReceberJogo(sock, modo, equipa, jogo, idCliente);
 
     /* 7) Cleanup */
