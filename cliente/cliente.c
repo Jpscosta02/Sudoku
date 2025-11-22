@@ -75,7 +75,7 @@ static void receberRankingCompeticao(int sock,
                                      const char *nomeUtilizador,
                                      const char *ficheiroLog)
 {
-    printf("\n⏳ A aguardar ranking final da competição...\n\n");
+    printf("\n A aguardar ranking final da competição...\n\n");
     LOG_CLI(idAtribuido, nomeUtilizador,
             "RANKING_ESPERA", "A aguardar ranking final da competição", ficheiroLog);
 
@@ -99,7 +99,7 @@ static void receberRankingCompeticao(int sock,
             if (strncmp(linha, "RANKING", 7) == 0) {
                 int total;
                 if (sscanf(linha, "RANKING %d", &total) == 1) {
-                    printf("===== 🏆 RANKING FINAL (%d equipas) =====\n", total);
+                    printf("===== RANKING FINAL (%d equipas) =====\n", total);
                     pos = 1;
 
                     char desc[80];
@@ -135,7 +135,7 @@ static void receberRankingCompeticao(int sock,
                 }
             }
             else if (strncmp(linha, "FIM_COMPETICAO", 14) == 0) {
-                printf("\n🏁 Competição terminada!\n");
+                printf("\n Competição terminada!\n");
                 LOG_CLI(idAtribuido, nomeUtilizador,
                         "FIM_COMPETICAO", "Fim de competição recebido no cliente", ficheiroLog);
                 return;
@@ -308,7 +308,7 @@ int main(int argc, char *argv[])
         }
 
         if (erros == 0) {
-            printf("\n✔ Sudoku correto!\n");
+            printf("\n Sudoku correto!\n");
             LOG_CLI(idAtribuido, cfg.idCliente,
                     "RESULTADO_OK", "Sudoku correto (0 erros)", ficheiroLog);
 
@@ -321,7 +321,7 @@ int main(int argc, char *argv[])
             return 0;
         }
 
-        printf("\n✘ Sudoku com %d erro(s). Corrige e tenta de novo.\n", erros);
+        printf("\n Sudoku com %d erro(s). Corrige e tenta de novo.\n", erros);
 
         {
             char desc[80];
