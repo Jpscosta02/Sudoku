@@ -111,7 +111,7 @@ static void aplicarUpdatesPendentes(int sock,
                 else if (strncmp(line, "RANKING", 7) == 0) {
                     int total;
                     if (sscanf(line, "RANKING %d", &total) == 1) {
-                        printf("\n===== 🏆 RANKING FINAL (%d equipas) =====\n", total);
+                        printf("\n===== RANKING FINAL (%d equipas) =====\n", total);
                         posRanking = 1;
                         LOG_CLI(idAtribuido, nomeUtilizador,
                                 "RANKING_INICIO", "Recebido início de ranking", ficheiroLog);
@@ -122,13 +122,13 @@ static void aplicarUpdatesPendentes(int sock,
                     double t;
                     if (sscanf(line, "%d %lf", &eq, &t) == 2) {
                         if (posRanking == 1)
-                            printf("\033[1;32m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;32m%2dº -> Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
                         else if (posRanking == 2)
-                            printf("\033[1;33m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;33m%2dº -> Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
                         else if (posRanking == 3)
-                            printf("\033[1;31m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;31m%2dº -> Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
                         else
-                            printf("%2dº ► Equipa %d — %.2fs\n", posRanking, eq, t);
+                            printf("%2dº -> Equipa %d — %.2fs\n", posRanking, eq, t);
 
                         char desc[80];
                         snprintf(desc, sizeof(desc),
@@ -142,7 +142,7 @@ static void aplicarUpdatesPendentes(int sock,
                 }
                 /* FIM_COMPETICAO */
                 else if (strncmp(line, "FIM_COMPETICAO", 14) == 0) {
-                    printf("\n🏁 Competição terminada para a tua equipa!\n");
+                    printf("\n Competição terminada para a tua equipa!\n");
                     fimCompeticaoFlag = 1;
                     LOG_CLI(idAtribuido, nomeUtilizador,
                             "FIM_COMPETICAO", "Servidor indicou fim da competição", ficheiroLog);
