@@ -1,5 +1,3 @@
-// servidor/tratar_cliente.c
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +10,8 @@
 #include "../comum/logs.h"
 #include "../protocolo/protocolo.h"
 
+
+#include "sincronizacao.h"
 #include "tratar_cliente.h"
 #include "gestor_ids.h"
 #include "jogos.h"
@@ -26,6 +26,9 @@
 #define MODO_COMPETICAO  2
 
 extern sem_t semClientes;
+
+static pthread_mutex_t mxJogoCompeticao = PTHREAD_MUTEX_INITIALIZER;
+static const Jogo *jogoCompeticao = NULL;
 
 /* ============================================================
    LOOP PRINCIPAL DO CLIENTE
@@ -74,8 +77,7 @@ static void loopReceberJogo(int sock,
             if (sscanf(buffer, "SOLUCAO %d %81s",
                        &idRecebido, solucaoRecebida) == 2)
             {
-                int erros =
-                    validarSudokuFIFO(solucaoRecebida, jogo->solucao);
+                int erros = validarSudokuFIFO(solucaoRecebida, jogo->solucao);
 
                 if (erros == 0) {
 
@@ -86,8 +88,7 @@ static void loopReceberJogo(int sock,
                         time_t tFim = time(NULL);
                         double tempoEquipa = 0.0;
 
-                        int marcou =
-                            registarFimEquipa(equipa, tFim, &tempoEquipa);
+                        int marcou = registarFimEquipa(equipa, tFim, &tempoEquipa);
 
                         if (marcou) {
                             printf("[DEBUG] Equipa %d terminou em %.2f s\n",
@@ -103,13 +104,26 @@ static void loopReceberJogo(int sock,
                         }
                     }
 
-                    /* Primeiro: enviar SEMPRE o RESULTADO para este cliente */
+                    /* Enviar SEMPRE o RESULTADO ao cliente */
                     enviarResultadoOK(sock, idJogo);
 
-                    /* Só depois, e apenas uma vez (última equipa), enviar ranking a todos */
+                    /* Se foi a última equipa → enviar ranking + RESET */
                     if (modo == MODO_COMPETICAO && ultimo) {
                         printf("[RANKING] Todas as equipas terminaram! A enviar ranking...\n");
                         enviarRankingATodos();
+
+                        /* ==========  RESET DA COMPETIÇÃO  ========== */
+
+                        pthread_mutex_lock(&mxJogoCompeticao);
+                        jogoCompeticao = NULL;   // permite novo jogo numa nova competição
+                        pthread_mutex_unlock(&mxJogoCompeticao);
+
+                        limparResultadosCompeticao();    // limpa ranking antigo
+                        inicializarEquipas();            // limpa sudokuTerminado, tempos, etc.
+                        inicializarBarreira(GRUPO_COMPETICAO); // prepara nova competição
+
+                        printf("[RESET] Estado da competição reinicializado.\n");
+                        /* ============================================ */
                     }
                 }
                 else {
@@ -141,7 +155,7 @@ void *tratarCliente(void *arg)
 
     printf("[DEBUG] Thread criada (sock=%d)\n", sock);
 
-    /* 1) Receber pedido de jogo (inclui modo e equipa) */
+    /* 1) Receber pedido */
     if (receberPedidoJogoServidorModo(sock,
                                       idBase, sizeof(idBase),
                                       &modo, &equipa) <= 0)
@@ -151,11 +165,11 @@ void *tratarCliente(void *arg)
         return NULL;
     }
 
-    /* 2) Atribuir ID interno */
+    /* 2) Atribuir ID */
     int idCliente = atribuirIdCliente();
     enviarIdAtribuidoServidor(sock, idCliente);
 
-    /* 3) Modo competição → registar equipa e esperar barreira */
+    /* 3) Competição → entrar na barreira */
     if (modo == MODO_COMPETICAO) {
 
         registarClienteLigado(idCliente, equipa, sock);
@@ -167,22 +181,41 @@ void *tratarCliente(void *arg)
     }
 
     /* 4) Obter jogo */
-    const Jogo *jogo = obterJogoProximo();
+    const Jogo *jogo = NULL;
+
+    if (modo == MODO_COMPETICAO) {
+        pthread_mutex_lock(&mxJogoCompeticao);
+
+        if (jogoCompeticao == NULL) {
+            jogoCompeticao = obterJogoProximo();
+            if (jogoCompeticao) {
+                printf("[DEBUG] Jogo competição escolhido: ID=%d\n",
+                       jogoCompeticao->id);
+            }
+        }
+
+        jogo = jogoCompeticao;
+        pthread_mutex_unlock(&mxJogoCompeticao);
+
+    } else {
+        jogo = obterJogoProximo();
+    }
+
     if (!jogo) {
-        enviarErro(sock, "Sem jogos");
+        enviarErro(sock, "Sem jogos disponíveis");
         close(sock);
         sem_post(&semClientes);
         return NULL;
     }
 
-    /* 5) Enviar tabuleiro para o cliente */
+    /* 5) Enviar tabuleiro */
     if (enviarJogoServidor(sock, jogo->id, jogo->jogo) <= 0) {
         close(sock);
         sem_post(&semClientes);
         return NULL;
     }
 
-    /* 6) Loop de interação */
+    /* 6) Loop */
     loopReceberJogo(sock, modo, equipa, jogo, idCliente);
 
     /* 7) Cleanup */

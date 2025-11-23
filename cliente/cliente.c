@@ -292,7 +292,6 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        printf("[DEBUG CLIENTE] Solução enviada. Vou esperar resultado...\n");
         LOG_CLI(idAtribuido, cfg.idCliente,
                 "SOLUCAO_ENVIADA", "Solução enviada, a aguardar resultado", ficheiroLog);
 
@@ -308,7 +307,7 @@ int main(int argc, char *argv[])
         }
 
         if (erros == 0) {
-            printf("\n✔ Sudoku correto!\n");
+            printf("\n Sudoku correto!\n");
             LOG_CLI(idAtribuido, cfg.idCliente,
                     "RESULTADO_OK", "Sudoku correto (0 erros)", ficheiroLog);
 
@@ -321,7 +320,7 @@ int main(int argc, char *argv[])
             return 0;
         }
 
-        printf("\n✘ Sudoku com %d erro(s). Corrige e tenta de novo.\n", erros);
+        printf("\n Sudoku com %d erro(s). Corrige e tenta de novo.\n", erros);
 
         {
             char desc[80];
