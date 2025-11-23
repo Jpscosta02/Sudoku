@@ -1,4 +1,20 @@
 // protocolo/protocolo.c
+// ======================================================================
+// Este módulo implementa todo o protocolo de comunicação entre
+// CLIENTE e SERVIDOR.
+//
+// É responsável por:
+//   • Ler mensagens linha-a-linha do socket
+//   • Enviar pedidos de jogo (normal e competição)
+//   • Enviar/receber ID atribuído
+//   • Enviar/receber jogo
+//   • Enviar/receber solução
+//   • Enviar/receber SET/UPDATE (sync equipas)
+//   • Enviar/receber RESULTADO
+//   • Enviar/receber SAIR
+//   • Enviar/receber ERRO
+// ======================================================================
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -6,7 +22,12 @@
 #include "protocolo.h"
 
 /* ============================================================
-   LEITURA LINHA-A-LINHA
+   LEITURA LINHA-A-LINHA (função interna)
+   ------------------------------------------------------------
+   Lê do socket caracter a caracter até encontrar '\n'
+   ou até atingir max-1 caracteres.
+   - Retorna nº de bytes lidos
+   - Retorna 0 ou <0 em erro ou ligação fechada
    ============================================================ */
 
 static int receberLinha(int sock, char *buffer, int max)
@@ -15,13 +36,13 @@ static int receberLinha(int sock, char *buffer, int max)
 
     while (pos < max - 1) {
         char c;
-        int n = read(sock, &c, 1);
+        int n = read(sock, &c, 1);       // Lê 1 byte
         if (n <= 0) {
-            if (pos == 0) return n;   // erro ou ligação fechada logo de início
-            break;
+            if (pos == 0) return n;      // ligação fechou logo no início
+            break;                       // termina linha lida parcialmente
         }
         buffer[pos++] = c;
-        if (c == '\n') break;
+        if (c == '\n') break;            // linha completa
     }
 
     buffer[pos] = '\0';
@@ -29,7 +50,7 @@ static int receberLinha(int sock, char *buffer, int max)
 }
 
 /* ============================================================
-   MENSAGEM BASE
+   MENSAGEM BASE — enviar string para o socket
    ============================================================ */
 
 int enviarMensagem(int sock, const char *msg)
@@ -38,7 +59,11 @@ int enviarMensagem(int sock, const char *msg)
 }
 
 /* ============================================================
-   PEDIR JOGO (CLIENTE -> SERVIDOR)
+   PEDIR JOGO (CLIENTE → SERVIDOR)
+   ------------------------------------------------------------
+   Existem dois tipos de pedido:
+     • JOGO_NORMAL <idCliente>
+     • JOGO_COMPETICAO <idCliente> <equipa>
    ============================================================ */
 
 int pedirJogoNormal(int sock, const char *id)
@@ -55,14 +80,23 @@ int pedirJogoCompeticao(int sock, const char *id, int equipa)
     return enviarMensagem(sock, msg);
 }
 
-/* Versão simples antiga (se ainda for usada nalgum sítio) */
+/* ------------------------------------------------------------
+   VERSÃO ANTIGA — só devolve o ID
+   (mantida por compatibilidade)
+   ------------------------------------------------------------ */
 int receberPedidoJogoServidor(int sock, char *idOut, int max)
 {
     int modoDummy, equipaDummy;
     return receberPedidoJogoServidorModo(sock, idOut, max, &modoDummy, &equipaDummy);
 }
 
-/* Versão completa: devolve modo (1=normal, 2=competição) e equipa */
+/* ------------------------------------------------------------
+   VERSÃO COMPLETA:
+   lê pedido e devolve:
+     modoOut = 1 → normal
+                2 → competição
+     equipaOut → nº da equipa no modo competição
+   ------------------------------------------------------------ */
 int receberPedidoJogoServidorModo(int sock,
                                   char *idOut,
                                   int max,
@@ -77,14 +111,14 @@ int receberPedidoJogoServidorModo(int sock,
 
     /* Jogo normal */
     if (sscanf(buf, "JOGO_NORMAL %s", idOut) == 1) {
-        if (modoOut)   *modoOut   = 1;  // 1 = normal
+        if (modoOut)   *modoOut   = 1;  // modo normal
         if (equipaOut) *equipaOut = 0;
         return 1;
     }
 
-    /* Jogo competição por equipas */
+    /* Jogo competição */
     if (sscanf(buf, "JOGO_COMPETICAO %s %d", idOut, &equipaTmp) == 2) {
-        if (modoOut)   *modoOut   = 2;  // 2 = competição
+        if (modoOut)   *modoOut   = 2;
         if (equipaOut) *equipaOut = equipaTmp;
         return 1;
     }
@@ -94,6 +128,9 @@ int receberPedidoJogoServidorModo(int sock,
 
 /* ============================================================
    ID ATRIBUÍDO
+   ------------------------------------------------------------
+   Servidor → Cliente:
+     ID_ATRIBUIDO <idInterno>
    ============================================================ */
 
 int enviarIdAtribuidoServidor(int sock, int id)
@@ -115,7 +152,10 @@ int receberIdAtribuidoCliente(int sock, int *id)
 }
 
 /* ============================================================
-   JOGO
+   JOGO (tabuleiro inicial)
+   ------------------------------------------------------------
+   Servidor → Cliente:
+     JOGO <idJogo> <tabuleiro81chars>
    ============================================================ */
 
 int enviarJogoServidor(int sock, int idJogo, const char *tab)
@@ -138,7 +178,10 @@ int receberJogo(int sock, int *idJogo, char *tab)
 }
 
 /* ============================================================
-   SOLUCAO
+   SOLUÇÃO
+   ------------------------------------------------------------
+   Cliente → Servidor:
+     SOLUCAO <idJogo> <string81>
    ============================================================ */
 
 int enviarSolucao(int sock, int idJogo, const char *sol)
@@ -161,7 +204,10 @@ int receberSolucaoServidor(int sock, int *idJogo, char *sol)
 }
 
 /* ============================================================
-   SET / UPDATE (sincronização de equipas)
+   SET / UPDATE
+   ------------------------------------------------------------
+   SET → Cliente envia jogada
+   UPDATE → Servidor reenvia jogada para colegas da mesma equipa
    ============================================================ */
 
 int enviarSET(int sock, int lin, int col, int val)
@@ -202,6 +248,10 @@ int receberUPDATE(int sock, int *lin, int *col, int *val)
 
 /* ============================================================
    RESULTADO
+   ------------------------------------------------------------
+   Formatos:
+     RESULTADO <id> OK
+     RESULTADO <id> ERROS <num>
    ============================================================ */
 
 int enviarResultadoOK(int sock, int idJogo)
@@ -224,12 +274,14 @@ int receberResultado(int sock, int *idJogo, int *erros)
     int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
 
+    // Sudoku correto
     if (strstr(buf, "OK")) {
         sscanf(buf, "RESULTADO %d OK", idJogo);
         *erros = 0;
         return 1;
     }
 
+    // Sudoku incorreto
     if (strstr(buf, "ERROS")) {
         sscanf(buf, "RESULTADO %d ERROS %d", idJogo, erros);
         return 1;
@@ -252,6 +304,7 @@ int receberSairServidor(int sock)
     char buf[64];
     int n = receberLinha(sock, buf, sizeof(buf));
     if (n <= 0) return n;
+
     return (strncmp(buf, "SAIR", 4) == 0);
 }
 
@@ -275,6 +328,7 @@ int receberErro(int sock, char *descricao, int max)
     if (strncmp(buf, "ERRO", 4) != 0)
         return -1;
 
+    // Copiar texto de erro, ignorando "ERRO "
     strncpy(descricao, buf + 5, max - 1);
     descricao[max - 1] = '\0';
     return 1;

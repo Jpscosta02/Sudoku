@@ -14,7 +14,7 @@
 #include "equipas.h"
 #include "clientes_ligados.h"
 #include "sincronizacao.h"
-#include "ranking.h"    /* 👉 ranking das equipas */
+#include "ranking.h"  
 
 int main(int argc, char *argv[])
 {

@@ -1,4 +1,14 @@
 // cliente/cliente_menu.c
+// =======================================================================
+// MÓDULO DO MENU DO CLIENTE
+// Gere toda a interação do utilizador com o Sudoku:
+//   - Inserir valores
+//   - Apagar valores
+//   - Validar localmente
+//   - Enviar solução
+//   - Receber updates em competição (UPDATE, RANKING, FIM_COMPETICAO)
+// =======================================================================
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -14,7 +24,8 @@
 #include "cliente_ui.h"
 
 /* =======================================================
-   LER LINHA
+   LER LINHA (input seguro do utilizador)
+   Remove o '\n' final e evita overflow.
    ======================================================= */
 static void lerLinha(char *buf, int max)
 {
@@ -27,7 +38,10 @@ static void lerLinha(char *buf, int max)
         buf[len - 1] = '\0';
 }
 
-/* protótipo */
+/* =======================================================
+   Protótipo de função usada para ler inteiros com suporte
+   para tratamento de UPDATE/RANKING/FIM enquanto lê inputs.
+   ======================================================= */
 static int lerIntComUpdates(const char *prompt,
                             int min, int max,
                             int *ok,
@@ -39,16 +53,22 @@ static int lerIntComUpdates(const char *prompt,
                             const char *nomeUtilizador,
                             const char *ficheiroLog);
 
-/* buffer persistente de updates e ranking */
+/* Buffers globais para acumular mensagens UPDATE/RANKING */
 static char bufUpdate[2048];
 static int  lenBuf = 0;
 
-/* flags globais do menu */
-static int fimCompeticaoFlag = 0;
-static int posRanking = 1;
+/* Flags globais */
+static int fimCompeticaoFlag = 0;  // indica se servidor enviou FIM_COMPETICAO
+static int posRanking = 1;         // posição atual no ranking
 
 /* =======================================================
-   aplicarUpdatesPendentes — trata UPDATE/RANKING/FIM
+   aplicarUpdatesPendentes
+   -------------------------------------------------------
+   Lê do socket em modo não-bloqueante (MSG_DONTWAIT) para:
+     • UPDATE lin col val
+     • RANKING N
+     • linhas de ranking
+     • FIM_COMPETICAO
    ======================================================= */
 static void aplicarUpdatesPendentes(int sock,
                                     int tab[9][9],
@@ -60,38 +80,47 @@ static void aplicarUpdatesPendentes(int sock,
     char tmp[256];
 
     while (1) {
+        // Receção não bloqueante
         ssize_t n = recv(sock, tmp, sizeof(tmp), MSG_DONTWAIT);
 
         if (n < 0) {
+            // Sem dados disponíveis → sair
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
             break;
         }
+
         if (n == 0)
             break;
 
+        // Acumula no buffer circular
         if (lenBuf + n >= (int)sizeof(bufUpdate))
             lenBuf = 0;
 
         memcpy(bufUpdate + lenBuf, tmp, n);
         lenBuf += (int)n;
 
+        // Processar linhas completas terminadas em '\n'
         int start = 0;
         while (start < lenBuf) {
+
             int i;
             for (i = start; i < lenBuf && bufUpdate[i] != '\n'; i++);
 
             if (i == lenBuf)
-                break;
+                break; // linha incompleta
 
             int lineLen = i - start;
             if (lineLen > 0) {
+
                 char line[256];
                 int copyLen = (lineLen < 255 ? lineLen : 255);
                 memcpy(line, bufUpdate + start, copyLen);
                 line[copyLen] = '\0';
 
-                /* UPDATE */
+                /* ---------------------------
+                   UPDATE lin col val
+                   --------------------------- */
                 int lin, col, val;
                 if (sscanf(line, "UPDATE %d %d %d", &lin, &col, &val) == 3) {
                     if (lin >= 0 && lin < 9 &&
@@ -99,59 +128,87 @@ static void aplicarUpdatesPendentes(int sock,
                         val >= 0 && val <= 9)
                     {
                         tab[lin][col] = val;
+
                         char desc[80];
                         snprintf(desc, sizeof(desc),
                                  "UPDATE recebido: (%d,%d)=%d",
                                  lin, col, val);
+
                         LOG_CLI(idAtribuido, nomeUtilizador,
                                 "UPDATE_REMOTO", desc, ficheiroLog);
                     }
                 }
-                /* RANKING */
+
+                /* ---------------------------
+                   RANKING N
+                   --------------------------- */
                 else if (strncmp(line, "RANKING", 7) == 0) {
                     int total;
                     if (sscanf(line, "RANKING %d", &total) == 1) {
                         printf("\n===== 🏆 RANKING FINAL (%d equipas) =====\n", total);
                         posRanking = 1;
+
                         LOG_CLI(idAtribuido, nomeUtilizador,
-                                "RANKING_INICIO", "Recebido início de ranking", ficheiroLog);
+                                "RANKING_INICIO",
+                                "Recebido início de ranking", ficheiroLog);
                     }
                 }
+
+                /* ---------------------------
+                   linhas do ranking: "equipa tempo"
+                   --------------------------- */
                 else if (isdigit((unsigned char)line[0])) {
                     int eq;
                     double t;
+
                     if (sscanf(line, "%d %lf", &eq, &t) == 2) {
+
                         if (posRanking == 1)
-                            printf("\033[1;32m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;32m%2dº ► Equipa %d — %.2fs\033[0m\n",
+                                   posRanking, eq, t);
+
                         else if (posRanking == 2)
-                            printf("\033[1;33m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;33m%2dº ► Equipa %d — %.2fs\033[0m\n",
+                                   posRanking, eq, t);
+
                         else if (posRanking == 3)
-                            printf("\033[1;31m%2dº ► Equipa %d — %.2fs\033[0m\n", posRanking, eq, t);
+                            printf("\033[1;31m%2dº ► Equipa %d — %.2fs\033[0m\n",
+                                   posRanking, eq, t);
+
                         else
-                            printf("%2dº ► Equipa %d — %.2fs\n", posRanking, eq, t);
+                            printf("%2dº ► Equipa %d — %.2fs\n",
+                                   posRanking, eq, t);
 
                         char desc[80];
                         snprintf(desc, sizeof(desc),
                                  "Linha ranking: pos=%d equipa=%d tempo=%.2fs",
                                  posRanking, eq, t);
+
                         LOG_CLI(idAtribuido, nomeUtilizador,
                                 "RANKING_LINHA", desc, ficheiroLog);
 
                         posRanking++;
                     }
                 }
-                /* FIM_COMPETICAO */
+
+                /* ---------------------------
+                   FIM_COMPETICAO
+                   --------------------------- */
                 else if (strncmp(line, "FIM_COMPETICAO", 14) == 0) {
+
                     printf("\n🏁 Competição terminada para a tua equipa!\n");
                     fimCompeticaoFlag = 1;
+
                     LOG_CLI(idAtribuido, nomeUtilizador,
-                            "FIM_COMPETICAO", "Servidor indicou fim da competição", ficheiroLog);
+                            "FIM_COMPETICAO",
+                            "Servidor indicou fim da competição", ficheiroLog);
                 }
             }
 
             start = i + 1;
         }
 
+        // Reorganizar buffer (remover linhas já processadas)
         if (start > 0 && start < lenBuf) {
             memmove(bufUpdate, bufUpdate + start, lenBuf - start);
             lenBuf -= start;
@@ -160,11 +217,13 @@ static void aplicarUpdatesPendentes(int sock,
         }
     }
 
+    // Atualiza string do tabuleiro para sincronizar UI
     matrizParaString(tab, tabuleiroStr);
 }
 
 /* =======================================================
-   LER INTEIRO
+   Função auxiliar para ler inteiros durante o jogo,
+   tratando também mensagens UPDATE/RANKING/FIM_COMPETICAO.
    ======================================================= */
 static int lerIntComUpdates(const char *prompt,
                             int min, int max,
@@ -182,10 +241,12 @@ static int lerIntComUpdates(const char *prompt,
 
     while (1) {
 
+        // Se em competição, verificar mensagens pendentes
         if (modoCompeticao)
             aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
                                     idAtribuido, nomeUtilizador, ficheiroLog);
 
+        // Se já terminou, abortar leitura
         if (modoCompeticao && fimCompeticaoFlag) {
             *ok = 0;
             return 0;
@@ -193,6 +254,7 @@ static int lerIntComUpdates(const char *prompt,
 
         printf("%s", prompt);
         lerLinha(linha, sizeof(linha));
+
         if (linha[0] == '\0') {
             *ok = 0;
             return 0;
@@ -214,7 +276,15 @@ static int lerIntComUpdates(const char *prompt,
 }
 
 /* =======================================================
-   MENU SUDOKU
+   MENU DO SUDOKU
+   -------------------------------------------------------
+   Mostra tabuleiro e opções:
+     1 Inserir valor
+     2 Apagar valor
+     3 Validar localmente
+     4 Enviar solução
+     5 Sair sem enviar
+     6 Preencher automaticamente (TESTE)
    ======================================================= */
 int menuSudoku(char solucaoOut[82],
                char tabuleiroStr[82],
@@ -227,15 +297,19 @@ int menuSudoku(char solucaoOut[82],
 {
     int tab[9][9];
     int original[9][9];
+
+    // Inicializar tabuleiro interno
     inicializarTabuleiro(tabuleiroStr, tab, original);
 
     fimCompeticaoFlag = 0;
 
     LOG_CLI(idAtribuido, nomeUtilizador,
-            "ENTRAR_JOGO", "Cliente entrou no menu Sudoku", ficheiroLog);
+            "ENTRAR_JOGO",
+            "Cliente entrou no menu Sudoku", ficheiroLog);
 
     while (1) {
 
+        // Atualiza estado em competição
         if (modoCompeticao)
             aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
                                     idAtribuido, nomeUtilizador, ficheiroLog);
@@ -246,11 +320,15 @@ int menuSudoku(char solucaoOut[82],
             fgets(lixo, sizeof(lixo), stdin);
 
             solucaoOut[0] = '\0';
+
             LOG_CLI(idAtribuido, nomeUtilizador,
-                    "SAIR_JOGO_FIM_COMP", "Saiu do Sudoku por fim de competição", ficheiroLog);
-            return -1;      // fim de competição
+                    "SAIR_JOGO_FIM_COMP",
+                    "Saiu do Sudoku por fim de competição", ficheiroLog);
+
+            return -1;
         }
 
+        // Mostrar tabuleiro
         mostrarTabuleiroColorido(tab, original);
 
         printf("===== MENU SUDOKU =====\n");
@@ -270,44 +348,63 @@ int menuSudoku(char solucaoOut[82],
         if (!ok) {
             if (modoCompeticao && fimCompeticaoFlag) {
                 solucaoOut[0] = '\0';
+
                 LOG_CLI(idAtribuido, nomeUtilizador,
-                        "SAIR_JOGO_FIM_COMP", "Saiu do Sudoku por fim de competição", ficheiroLog);
+                        "SAIR_JOGO_FIM_COMP",
+                        "Saiu do Sudoku por fim de competição", ficheiroLog);
+
                 return -1;
             }
             continue;
         }
 
-        /* INSERIR */
+        /* =======================================================
+           OPÇÃO 1 — INSERIR VALOR
+           ======================================================= */
         if (op == 1) {
             int lin = lerIntComUpdates("Linha (1-9): ", 1, 9, &ok,
-                                       sock, modoCompeticao, tab, tabuleiroStr,
-                                       idAtribuido, nomeUtilizador, ficheiroLog);
+                                       sock, modoCompeticao, tab,
+                                       tabuleiroStr,
+                                       idAtribuido, nomeUtilizador,
+                                       ficheiroLog);
             if (!ok) continue;
+
             int col = lerIntComUpdates("Coluna (1-9): ", 1, 9, &ok,
-                                       sock, modoCompeticao, tab, tabuleiroStr,
-                                       idAtribuido, nomeUtilizador, ficheiroLog);
+                                       sock, modoCompeticao, tab,
+                                       tabuleiroStr,
+                                       idAtribuido, nomeUtilizador,
+                                       ficheiroLog);
             if (!ok) continue;
+
             int val = lerIntComUpdates("Valor (1-9): ", 1, 9, &ok,
-                                       sock, modoCompeticao, tab, tabuleiroStr,
-                                       idAtribuido, nomeUtilizador, ficheiroLog);
+                                       sock, modoCompeticao, tab,
+                                       tabuleiroStr,
+                                       idAtribuido, nomeUtilizador,
+                                       ficheiroLog);
             if (!ok) continue;
 
             lin--; col--;
 
             if (inserirValor(tab, original, lin, col, val) == 0) {
+
                 matrizParaString(tab, tabuleiroStr);
 
                 char desc[80];
                 snprintf(desc, sizeof(desc),
-                         "Inseriu %d em (%d,%d)", val, lin + 1, col + 1);
+                         "Inseriu %d em (%d,%d)",
+                         val, lin + 1, col + 1);
+
                 LOG_CLI(idAtribuido, nomeUtilizador,
                         "INSERIR", desc, ficheiroLog);
 
                 if (modoCompeticao) {
                     enviarSET(sock, lin, col, val);
+
                     aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                            idAtribuido, nomeUtilizador, ficheiroLog);
+                                            idAtribuido, nomeUtilizador,
+                                            ficheiroLog);
                 }
+
             } else {
                 printf("Não podes inserir nessa célula.\n");
             }
@@ -315,33 +412,46 @@ int menuSudoku(char solucaoOut[82],
             continue;
         }
 
-        /* APAGAR */
+        /* =======================================================
+           OPÇÃO 2 — APAGAR VALOR
+           ======================================================= */
         if (op == 2) {
             int lin = lerIntComUpdates("Linha (1-9): ", 1, 9, &ok,
-                                       sock, modoCompeticao, tab, tabuleiroStr,
-                                       idAtribuido, nomeUtilizador, ficheiroLog);
+                                       sock, modoCompeticao,
+                                       tab, tabuleiroStr,
+                                       idAtribuido, nomeUtilizador,
+                                       ficheiroLog);
             if (!ok) continue;
+
             int col = lerIntComUpdates("Coluna (1-9): ", 1, 9, &ok,
-                                       sock, modoCompeticao, tab, tabuleiroStr,
-                                       idAtribuido, nomeUtilizador, ficheiroLog);
+                                       sock, modoCompeticao,
+                                       tab, tabuleiroStr,
+                                       idAtribuido, nomeUtilizador,
+                                       ficheiroLog);
             if (!ok) continue;
 
             lin--; col--;
 
             if (apagarValor(tab, original, lin, col) == 0) {
+
                 matrizParaString(tab, tabuleiroStr);
 
                 char desc[80];
                 snprintf(desc, sizeof(desc),
-                         "Apagou valor em (%d,%d)", lin + 1, col + 1);
+                         "Apagou valor em (%d,%d)",
+                         lin + 1, col + 1);
+
                 LOG_CLI(idAtribuido, nomeUtilizador,
                         "APAGAR", desc, ficheiroLog);
 
                 if (modoCompeticao) {
                     enviarSET(sock, lin, col, 0);
+
                     aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                            idAtribuido, nomeUtilizador, ficheiroLog);
+                                            idAtribuido, nomeUtilizador,
+                                            ficheiroLog);
                 }
+
             } else {
                 printf("Não podes apagar essa célula.\n");
             }
@@ -349,25 +459,37 @@ int menuSudoku(char solucaoOut[82],
             continue;
         }
 
-        /* VALIDAR LOCAL */
+        /* =======================================================
+           OPÇÃO 3 — VALIDAR LOCALMENTE
+           ======================================================= */
         if (op == 3) {
+
             if (modoCompeticao)
                 aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                        idAtribuido, nomeUtilizador, ficheiroLog);
+                                        idAtribuido, nomeUtilizador,
+                                        ficheiroLog);
 
             int e1 = validarLinhas(tab);
             int e2 = validarColunas(tab);
             int e3 = validarQuadrados(tab);
 
             if (e1 == 0 && e2 == 0 && e3 == 0) {
+
                 printf("Sem erros locais.\n");
+
                 LOG_CLI(idAtribuido, nomeUtilizador,
-                        "VALIDAR_LOCAL", "Validação local sem erros", ficheiroLog);
+                        "VALIDAR_LOCAL",
+                        "Validação local sem erros", ficheiroLog);
+
             } else {
+
                 printf("Foram detetados erros locais.\n");
+
                 char desc[80];
                 snprintf(desc, sizeof(desc),
-                         "Validação local com erros (lin=%d col=%d quad=%d)", e1, e2, e3);
+                         "Validação local com erros (lin=%d col=%d quad=%d)",
+                         e1, e2, e3);
+
                 LOG_CLI(idAtribuido, nomeUtilizador,
                         "VALIDAR_LOCAL", desc, ficheiroLog);
             }
@@ -375,40 +497,59 @@ int menuSudoku(char solucaoOut[82],
             continue;
         }
 
-        /* ENVIAR SOLUÇÃO */
+        /* =======================================================
+           OPÇÃO 4 — ENVIAR SOLUÇÃO
+           ======================================================= */
         if (op == 4) {
+
             if (modoCompeticao) {
+
                 aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                        idAtribuido, nomeUtilizador, ficheiroLog);
+                                        idAtribuido, nomeUtilizador,
+                                        ficheiroLog);
 
                 if (fimCompeticaoFlag) {
                     printf("\n[INFO] A competição já terminou enquanto tentavas enviar a solução.\n");
+
                     solucaoOut[0] = '\0';
+
                     LOG_CLI(idAtribuido, nomeUtilizador,
                             "ENVIAR_SOLUCAO_FALHA",
                             "Tentou enviar solução mas competição já tinha terminado",
                             ficheiroLog);
-                    return -1;   // fim competição
+
+                    return -1;
                 }
             }
 
             matrizParaString(tab, solucaoOut);
             matrizParaString(tab, tabuleiroStr);
+
             LOG_CLI(idAtribuido, nomeUtilizador,
-                    "ENVIAR_SOLUCAO", "Solução enviada para validação", ficheiroLog);
+                    "ENVIAR_SOLUCAO",
+                    "Solução enviada para validação", ficheiroLog);
+
             return 1;
         }
 
-        /* SAIR SEM ENVIAR */
+        /* =======================================================
+           OPÇÃO 5 — SAIR SEM ENVIAR
+           ======================================================= */
         if (op == 5) {
             solucaoOut[0] = '\0';
+
             LOG_CLI(idAtribuido, nomeUtilizador,
-                    "SAIR_SEM_ENVIAR", "Jogador saiu sem enviar solução", ficheiroLog);
+                    "SAIR_SEM_ENVIAR",
+                    "Jogador saiu sem enviar solução", ficheiroLog);
+
             return 0;
         }
 
-        /* AUTO COMPLETE */
+        /* =======================================================
+           OPÇÃO 6 — AUTO COMPLETE (TESTE)
+           ======================================================= */
         if (op == 6) {
+
             if (!solucaoCorreta || strlen(solucaoCorreta) < 81) {
                 printf("Solução indisponível.\n");
                 continue;
@@ -416,8 +557,10 @@ int menuSudoku(char solucaoOut[82],
 
             if (modoCompeticao)
                 aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                        idAtribuido, nomeUtilizador, ficheiroLog);
+                                        idAtribuido, nomeUtilizador,
+                                        ficheiroLog);
 
+            // Copia diretamente a solução correta para o tabuleiro
             for (int i = 0; i < 9; i++)
                 for (int j = 0; j < 9; j++)
                     tab[i][j] = solucaoCorreta[i*9 + j] - '0';
@@ -425,14 +568,17 @@ int menuSudoku(char solucaoOut[82],
             matrizParaString(tab, tabuleiroStr);
 
             LOG_CLI(idAtribuido, nomeUtilizador,
-                    "AUTO_COMPLETE", "Tabuleiro preenchido automaticamente", ficheiroLog);
+                    "AUTO_COMPLETE",
+                    "Tabuleiro preenchido automaticamente", ficheiroLog);
 
             if (modoCompeticao) {
                 for (int i = 0; i < 9; i++)
                     for (int j = 0; j < 9; j++)
                         enviarSET(sock, i, j, tab[i][j]);
+
                 aplicarUpdatesPendentes(sock, tab, tabuleiroStr,
-                                        idAtribuido, nomeUtilizador, ficheiroLog);
+                                        idAtribuido, nomeUtilizador,
+                                        ficheiroLog);
             }
 
             continue;
