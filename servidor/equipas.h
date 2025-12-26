@@ -25,7 +25,7 @@ EstadoEquipa *obterEstadoEquipa(int equipa);
 void atualizarTabuleiroEquipa(int equipa, const char tab81[82]);
 
 /* Marca que um jogador entrou na equipa */
-void registarEntradaJogador(int equipa);
+int registarEntradaJogador(int equipa);
 
 /* Marca a conclusão do sudoku pela equipa */
 int registarFimEquipa(int equipa, time_t tFim, double *tempoEquipa);

@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <signal.h>
 
 #include "../comum/util.h"
 #include "../comum/logs.h"
@@ -35,6 +36,9 @@ static pthread_mutex_t mxJogoCompeticao = PTHREAD_MUTEX_INITIALIZER;
 
 /* Ponteiro para o jogo escolhido para todas as equipas */
 static const Jogo *jogoCompeticao = NULL;
+
+/* Flag global de shutdown vinda do servidor.c */
+extern volatile sig_atomic_t pararServidor;
 
 /* ============================================================
    LOOP PRINCIPAL DO CLIENTE
@@ -203,8 +207,21 @@ void *tratarCliente(void *arg)
         return NULL;
     }
 
+    if (modo == MODO_COMPETICAO && (equipa < 1 || equipa > MAX_EQUIPAS)) {
+        enviarErro(sock, "Equipa inválida");
+        close(sock);
+        sem_post(&semClientes);
+        return NULL;
+    }
+
     /* 2) Atribuir ID interno */
     int idCliente = atribuirIdCliente();
+    if (idCliente < 0) {
+        enviarErro(sock, "Servidor sem IDs disponíveis");
+        close(sock);
+        sem_post(&semClientes);
+        return NULL;
+    }
     enviarIdAtribuidoServidor(sock, idCliente);
 
     /* 3) Modo competição → sincronização e registo */
@@ -215,8 +232,17 @@ void *tratarCliente(void *arg)
 
         printf("[DEBUG] Cliente %d A ENTRAR NA BARREIRA...\n", idCliente);
 
-        /* Bloqueia até todas as equipas estarem prontas */
-        entrarBarreira();
+        /* Bloqueia até atingir o número configurado de clientes concorrentes */
+        if (entrarBarreira() != 0) {
+            /* Rearmar barreira para próximas tentativas */
+            inicializarBarreira(GRUPO_COMPETICAO);
+            enviarErro(sock, "Tempo limite de espera na barreira");
+            removerClienteLigado(idCliente);
+            libertarIdCliente(idCliente);
+            close(sock);
+            sem_post(&semClientes);
+            return NULL;
+        }
 
         printf("[DEBUG] Cliente %d SAIU DA BARREIRA!\n", idCliente);
     }
@@ -282,10 +308,19 @@ void aceitarClientes(int sockListen)
 {
     printf("[DEBUG] A aceitar clientes...\n");
 
-    while (1) {
+    while (!pararServidor) {
 
         /* Bloqueia quando limite de clientes simultâneos é atingido */
-        sem_wait(&semClientes);
+        if (sem_wait(&semClientes) == -1) {
+            if (pararServidor)
+                break;
+            continue;
+        }
+
+        if (pararServidor) {
+            sem_post(&semClientes);
+            break;
+        }
 
         /* Aceitar ligação */
         int *pSock = malloc(sizeof(int));
@@ -294,6 +329,8 @@ void aceitarClientes(int sockListen)
         if (*pSock < 0) {
             free(pSock);
             sem_post(&semClientes);
+            if (pararServidor)
+                break;
             continue;
         }
 
@@ -302,4 +339,6 @@ void aceitarClientes(int sockListen)
         pthread_create(&tid, NULL, tratarCliente, pSock);
         pthread_detach(tid);
     }
+
+    printf("[SHUTDOWN] Loop aceitarClientes terminado.\n");
 }

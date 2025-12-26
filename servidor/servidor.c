@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include "../comum/configuracao.h"
 #include "servidor_tcp.h"
@@ -15,6 +16,20 @@
 #include "clientes_ligados.h"
 #include "sincronizacao.h"
 #include "ranking.h"  
+
+/* Flag global para shutdown (Ctrl+C) */
+volatile sig_atomic_t pararServidor = 0;
+static int sockGlobal = -1;
+
+static void sigint_handler(int sig)
+{
+    (void)sig;
+    pararServidor = 1;
+    if (sockGlobal >= 0) {
+        close(sockGlobal); /* desbloqueia accept() */
+    }
+    printf("\n[SHUTDOWN] SIGINT recebido. A encerrar servidor...\n");
+}
 
 int main(int argc, char *argv[])
 {
@@ -30,19 +45,28 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    /* Instalar handler SIGINT (Ctrl+C) */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigint_handler;
+    sigaction(SIGINT, &sa, NULL);
+
     printf("MAX_CLIENTES=%d (modo competição)\n", cfg.maxClientes);
 
     /* ======================
        Inicializar módulos
        ====================== */
 
-    inicializarBarreira(cfg.maxClientes);          // barreira de arranque
+    inicializarBarreira(cfg.maxClientes);          // barreira para arranque simultâneo
     inicializarSincronizacao(cfg.maxClientes);     // semáforo de clientes
     inicializarEquipas();                          // estado das equipas
     inicializarClientesLigados();                  // lista de clientes ligados
     limparResultadosCompeticao();                  // ranking vazio no início
 
-    carregarJogosServidor(cfg.ficheiroJogos);
+    if (!carregarJogosServidor(cfg.ficheiroJogos)) {
+        fprintf(stderr, "Erro: não foi possível carregar jogos de '%s'\n", cfg.ficheiroJogos);
+        return 1;
+    }
 
     /* ======================
        Criar socket TCP servidor
@@ -53,6 +77,7 @@ int main(int argc, char *argv[])
         perror("Erro no socket servidor");
         return 1;
     }
+    sockGlobal = sockListen;
 
     printf("Servidor TCP à escuta na porta %d...\n", cfg.porta);
     printf("Servidor pronto.\n");

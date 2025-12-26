@@ -33,16 +33,13 @@ static sem_t semItens;      /* nº de pedidos na fila */
 static sem_t semEspaco;     /* espaços livres */
 static pthread_mutex_t mutexFila = PTHREAD_MUTEX_INITIALIZER;
 
-static int inicializado = 0;
-static pthread_t tidValidador;
+static pthread_once_t onceInit = PTHREAD_ONCE_INIT;
 
 /* ============================================================
    INICIALIZAÇÃO
    ============================================================ */
-void iniciarValidadorFIFO(void)
+static void iniciarValidadorFIFOOnce(void)
 {
-    if (inicializado) return;
-
     /* iniciar semáforos */
     sem_init(&semItens, 0, 0);
     sem_init(&semEspaco, 0, MAX_FILA_VALIDACAO);
@@ -51,12 +48,16 @@ void iniciarValidadorFIFO(void)
     fim = 0;
 
     /* criar thread validador */
+    pthread_t tidValidador;
     if (pthread_create(&tidValidador, NULL, threadValidadorFunc, NULL) != 0) {
         perror("Erro ao criar thread validador FIFO");
     }
     pthread_detach(tidValidador);
+}
 
-    inicializado = 1;
+void iniciarValidadorFIFO(void)
+{
+    pthread_once(&onceInit, iniciarValidadorFIFOOnce);
 }
 
 /* ============================================================

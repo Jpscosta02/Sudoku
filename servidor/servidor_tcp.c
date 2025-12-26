@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <errno.h>
 
 int criarSocketServidor(int porta)
 {
@@ -50,6 +51,10 @@ int aceitarCliente(int sockfd)
 
     int newsockfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
     if (newsockfd < 0) {
+        if (errno == EINTR) {
+            /* Interrupted by signal (ex.: SIGINT para shutdown) */
+            return -1;
+        }
         perror("Erro no accept()");
         return -1;
     }

@@ -288,6 +288,7 @@ static int lerIntComUpdates(const char *prompt,
    ======================================================= */
 int menuSudoku(char solucaoOut[82],
                char tabuleiroStr[82],
+               const char *tabuleiroInicial,
                const char *solucaoCorreta,
                const char *ficheiroLog,
                int idAtribuido,
@@ -298,8 +299,22 @@ int menuSudoku(char solucaoOut[82],
     int tab[9][9];
     int original[9][9];
 
-    // Inicializar tabuleiro interno
-    inicializarTabuleiro(tabuleiroStr, tab, original);
+    // Inicializar máscaras de células fixas a partir do tabuleiro original do puzzle
+    inicializarTabuleiro(tabuleiroInicial, tab, original);
+
+    // Repor estado atual (tabuleiroStr) apenas nas células não fixas
+    for (int i = 0; i < 81; i++) {
+        int lin = i / 9;
+        int col = i % 9;
+
+        if (!original[lin][col]) {
+            char c = tabuleiroStr[i];
+            if (c >= '1' && c <= '9')
+                tab[lin][col] = c - '0';
+            else
+                tab[lin][col] = 0;
+        }
+    }
 
     fimCompeticaoFlag = 0;
 

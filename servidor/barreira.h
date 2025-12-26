@@ -2,6 +2,6 @@
 #define BARREIRA_H
 
 void inicializarBarreira(int max);
-void entrarBarreira(void);
+int entrarBarreira(void);   /* retorna 0 se todos chegaram, -1 em timeout */
 
 #endif

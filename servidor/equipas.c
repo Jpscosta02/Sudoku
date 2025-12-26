@@ -55,22 +55,24 @@ void atualizarTabuleiroEquipa(int equipa, const char tab81[82])
 /* ============================================================
    REGISTAR ENTRADA DE JOGADOR
    ============================================================ */
-void registarEntradaJogador(int equipa)
+int registarEntradaJogador(int equipa)
 {
     if (equipa < 1 || equipa > MAX_EQUIPAS)
-        return;
+        return 0;
 
     pthread_mutex_lock(&mx);
 
     EstadoEquipa *e = &equipas[equipa - 1];
     e->jogadoresAtivos++;
+    int primeiro = (e->jogadoresAtivos == 1);
 
     // Apenas o primeiro jogador arranca o cronómetro
-    if (e->jogadoresAtivos == 1) {
+    if (primeiro) {
         e->tInicio = time(NULL);
     }
 
     pthread_mutex_unlock(&mx);
+    return primeiro;
 }
 
 /* ============================================================
@@ -147,4 +149,3 @@ int todasEquipasTerminaram(void)
     pthread_mutex_unlock(&mx);
     return 1;
 }
-

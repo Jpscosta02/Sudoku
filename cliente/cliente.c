@@ -198,6 +198,7 @@ int main(int argc, char *argv[])
     int idAtribuido;
     int idJogo;
     char tabuleiroStr[82];
+    char tabuleiroInicial[82];
     char solucaoCorreta[82];
     char ficheiroLog[128];
 
@@ -300,6 +301,10 @@ int main(int argc, char *argv[])
                 "RECEBER_JOGO", desc, ficheiroLog);
     }
 
+    /* Guardar cópia do tabuleiro inicial (para saber quais células são fixas) */
+    strncpy(tabuleiroInicial, tabuleiroStr, sizeof(tabuleiroInicial) - 1);
+    tabuleiroInicial[81] = '\0';
+
     /* === OBTER SOLUÇÃO CORRETA DO FICHEIRO LOCAL === */
     if (!obterSolucaoPorId(FICHEIRO_JOGOS, idJogo, solucaoCorreta)) {
 
@@ -317,6 +322,7 @@ int main(int argc, char *argv[])
 
         int enviar = menuSudoku(solucaoOut,
                                 tabuleiroStr,
+                                tabuleiroInicial,
                                 solucaoCorreta,
                                 ficheiroLog,
                                 idAtribuido,

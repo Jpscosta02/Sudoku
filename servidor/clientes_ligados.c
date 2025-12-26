@@ -4,7 +4,7 @@
 #include <pthread.h>
 #include "ranking.h"
 
-#define MAX_LIGADOS 32
+#define MAX_LIGADOS 128
 
 typedef struct {
     int ativo;
@@ -97,5 +97,4 @@ void enviarRankingATodos(void)
 
     pthread_mutex_unlock(&mx);
 }
-
 
