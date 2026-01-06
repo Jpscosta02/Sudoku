@@ -1,62 +1,93 @@
+// servidor/servidor.c
+
 #include <stdio.h>
-#include "configuracao.h"
-#include "logs.h"
-#include "sudoku.h"
-// Se estas a ler isto, eu consegui. Palavra-passe: semilhas.
-int main(int argc, char *argv[]) {
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+
+#include "../comum/configuracao.h"
+#include "servidor_tcp.h"
+#include "tratar_cliente.h"
+
+#include "barreira.h"
+#include "jogos.h"
+#include "equipas.h"
+#include "clientes_ligados.h"
+#include "sincronizacao.h"
+#include "ranking.h"  
+
+/* Flag global para shutdown (Ctrl+C) */
+volatile sig_atomic_t pararServidor = 0;
+static int sockGlobal = -1;
+
+static void sigint_handler(int sig)
+{
+    (void)sig;
+    pararServidor = 1;
+    if (sockGlobal >= 0) {
+        close(sockGlobal); /* desbloqueia accept() */
+    }
+    printf("\n[SHUTDOWN] SIGINT recebido. A encerrar servidor...\n");
+}
+
+int main(int argc, char *argv[])
+{
     if (argc < 2) {
-        printf("Uso: %s <ficheiro_config>\n", argv[0]);
+        printf("Uso: %s <ficheiro-config>\n", argv[0]);
         return 1;
     }
 
-    // --- Ler configuração do servidor ---
     ConfigServidor cfg;
+
     if (!carregarConfiguracaoServidor(argv[1], &cfg)) {
+        printf("Erro ao carregar configuração.\n");
         return 1;
     }
 
-    // --- Registar evento inicial ---
-    registarEvento("logs/servidor.log", "Servidor iniciado");
-    printf("Servidor configurado na porta %d\n", cfg.porta);
+    /* Instalar handler SIGINT (Ctrl+C) */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigint_handler;
+    sigaction(SIGINT, &sa, NULL);
 
-    // --- TESTE DE VERIFICAÇÃO DE SUDOKU ---
-    int jogo[TAM][TAM];
-    int solucao[TAM][TAM];
+    printf("MAX_CLIENTES=%d (modo competição)\n", cfg.maxClientes);
 
+    /* ======================
+       Inicializar módulos
+       ====================== */
 
-    // Sudoku do enunciado
-    const char *jogoStr =
-        "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
-    const char *solucaoStr =
-        "534678912672195348198342567859761423426853791713924856961537284287419635345286179";
+    inicializarBarreira(cfg.maxClientes);          // barreira para arranque simultâneo
+    inicializarSincronizacao(cfg.maxClientes);     // semáforo de clientes
+    inicializarEquipas();                          // estado das equipas
+    inicializarClientesLigados();                  // lista de clientes ligados
+    limparResultadosCompeticao();                  // ranking vazio no início
 
-    // Converter as strings para matrizes 9x9
-    lerSudokuDeString(jogoStr, jogo);
-    lerSudokuDeString(solucaoStr, solucao);
-
-    printf("\nTabuleiro de Sudoku:\n");
-    mostrarSudoku(jogo);
-
-    printf("\nSolucao:\n");
-    mostrarSudoku(solucao);
-
-    
-    // Verificar se o Sudoku está correto
-    int tamanho = verificarValidezTamanho(jogoStr);
-    if (tamanho == 0) {
-        printf("Sudoku verificado: Jogo inválido; tamanho errado.\n.");
-        registarEvento("logs/servidor.log", "Verificação: Sudoku inválido; tamanho errado.");
+    if (!carregarJogosServidor(cfg.ficheiroJogos)) {
+        fprintf(stderr, "Erro: não foi possível carregar jogos de '%s'\n", cfg.ficheiroJogos);
+        return 1;
     }
-    else {
-        int erros = verificarSudoku(jogo, solucao);
-        if (erros == 0) {
-            printf(" Sudoku verificado: sem erros!\n");
-            registarEvento("logs/servidor.log", "Verificação: Sudoku correto");
-        }
-        else {
-            printf(" Sudoku incorreto: %d erros encontrados.\n", erros);
-            registarEvento("logs/servidor.log", "Verificação: Sudoku incorreto");
-        }
+
+    /* ======================
+       Criar socket TCP servidor
+       ====================== */
+
+    int sockListen = criarSocketServidor(cfg.porta);
+    if (sockListen < 0) {
+        perror("Erro no socket servidor");
+        return 1;
     }
+    sockGlobal = sockListen;
+
+    printf("Servidor TCP à escuta na porta %d...\n", cfg.porta);
+    printf("Servidor pronto.\n");
+
+    /* ======================
+       Aceitar clientes
+       ====================== */
+
+    aceitarClientes(sockListen);
+
+    close(sockListen);
     return 0;
 }
